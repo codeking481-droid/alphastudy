@@ -4,7 +4,8 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const envSchema = z.object({
-  DATABASE_URL: z.string().min(1),
+  // Optional — when absent, the server runs an embedded Postgres (PGlite)
+  DATABASE_URL: z.string().min(1).optional(),
   API_PORT: z.coerce.number().default(parseInt(process.env.PORT || '3001', 10)),
   APP_ENV: z.enum(['development', 'production', 'test']).default('development'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),

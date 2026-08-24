@@ -26,6 +26,10 @@ function findMigrationsFolder(): string {
 
 async function runMigrations() {
   const env = getEnv();
+  if (!env.DATABASE_URL) {
+    console.log('ℹ️  DATABASE_URL not set — embedded Postgres (PGlite) auto-migrates on server start. Nothing to do.');
+    process.exit(0);
+  }
   console.log('🔄 Running database migrations...');
   console.log(`   Database: ${env.DATABASE_URL.replace(/\/\/.*@/, '//***@')}`);
 

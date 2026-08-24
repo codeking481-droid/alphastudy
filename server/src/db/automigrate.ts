@@ -8,15 +8,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 /**
  * Auto-migration: creates all tables on first boot.
  * Safe to run multiple times (uses IF NOT EXISTS).
+ *
+ * Accepts either a Postgres connection string or a PGlite instance
+ * (embedded mode).
  */
-export async function autoMigrate(databaseUrl: string): Promise<void> {
+export async function autoMigrate(target: string | import('@electric-sql/pglite').PGlite): Promise<void> {
   console.log('🔄 Running auto-migration...');
 
-  const pool = new pg.Pool({ connectionString: databaseUrl });
+  const embedded = typeof target !== 'string';
+  const client: any = embedded ? target : new pg.Pool({ connectionString: target });
+
+  // pg.Pool supports multi-statement simple queries; PGlite needs exec()
+  const runSql = (sql: string) => (embedded ? client.exec(sql) : client.query(sql));
 
   try {
     // Check if tables already exist
-    const check = await pool.query(`
+    const check = await client.query(`
       SELECT EXISTS (
         SELECT FROM information_schema.tables WHERE table_name = 'users'
       ) as exists
@@ -30,7 +37,7 @@ export async function autoMigrate(databaseUrl: string): Promise<void> {
     console.log('   Creating tables...');
 
     // Create enums
-    await pool.query(`
+    await runSql(`
       DO $$ BEGIN
         CREATE TYPE "public"."user_role" AS ENUM('admin', 'user');
       EXCEPTION WHEN duplicate_object THEN null;
@@ -78,7 +85,7 @@ export async function autoMigrate(databaseUrl: string): Promise<void> {
     `);
 
     // Create tables
-    await pool.query(`
+    await runSql(`
       CREATE TABLE IF NOT EXISTS "users" (
         "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
         "email" varchar(255) NOT NULL UNIQUE,
@@ -224,7 +231,7 @@ export async function autoMigrate(databaseUrl: string): Promise<void> {
     `);
 
     // Add foreign keys
-    await pool.query(`
+    await runSql(`
       DO $$ BEGIN
         ALTER TABLE "learning_records" ADD CONSTRAINT "learning_records_user_id_users_id_fk"
           FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE cascade ON UPDATE no action;
@@ -271,6 +278,6 @@ export async function autoMigrate(databaseUrl: string): Promise<void> {
     console.error('❌ Auto-migration failed:', error);
     throw error;
   } finally {
-    await pool.end();
+    if (!embedded) await client.end();
   }
 }

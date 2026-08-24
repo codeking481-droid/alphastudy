@@ -2,7 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { getEnv } from './config/env.js';
-import { closeDb } from './db/index.js';
+import { closeDb, getPglite, isEmbeddedDb } from './db/index.js';
 import { autoMigrate } from './db/automigrate.js';
 import { errorHandler } from './middleware/errors.js';
 import { healthRoutes } from './routes/health.js';
@@ -92,10 +92,13 @@ async function buildServer() {
 
 async function start() {
   const env = getEnv();
+  if (isEmbeddedDb()) {
+    console.log('ℹ️  DATABASE_URL not set — running with embedded Postgres (PGlite)');
+  }
 
   // Auto-migrate database on first boot
   try {
-    await autoMigrate(env.DATABASE_URL);
+    await autoMigrate(env.DATABASE_URL ?? (await getPglite()));
   } catch (err) {
     console.error('⚠️  Auto-migration failed — server will start but some features may not work:', err);
   }

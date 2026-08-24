@@ -32,6 +32,7 @@ npm-debug.log*
 # Server
 server/dist/
 server/node_modules/
+server/.pgdata/
 
 # Test coverage
 coverage/
