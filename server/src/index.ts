@@ -6,17 +6,12 @@ import { closeDb } from './db/index.js';
 import { errorHandler } from './middleware/errors.js';
 import { healthRoutes } from './routes/health.js';
 import { llmRoutes } from './routes/llm.js';
+import { authRoutes } from './routes/auth.js';
+import { alocRoutes } from './routes/aloc.js';
 import { registerEntityRoutes } from './routes/entity.js';
 import {
-  conversationMessages,
-  learningRecords,
-  mistakes,
-  missions,
-  notes,
-  questions,
-  portalSessions,
-  concepts,
-  users,
+  conversationMessages, learningRecords, mistakes, missions,
+  notes, questions, portalSessions, concepts, users,
 } from './repositories/index.js';
 import { EntityService } from './services/entity.js';
 import path from 'path';
@@ -25,13 +20,8 @@ import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// ============================================================================
-// Alpha Study API Server — serves both API and frontend
-// ============================================================================
-
 async function buildServer() {
   const env = getEnv();
-
   const app = Fastify({
     logger: {
       level: env.LOG_LEVEL,
@@ -41,98 +31,63 @@ async function buildServer() {
     },
   });
 
-  // ── CORS ──────────────────────────────────────────────────────────────
   await app.register(cors, {
     origin: env.CORS_ORIGIN.split(',').map((s) => s.trim()),
     credentials: true,
   });
-
-  // ── Error Handler ─────────────────────────────────────────────────────
   await app.register(errorHandler);
-
-  // ── Health Routes ─────────────────────────────────────────────────────
   await app.register(healthRoutes);
-
-  // ── LLM Routes ───────────────────────────────────────────────────────
   await app.register(llmRoutes);
+  await app.register(authRoutes);
+  await app.register(alocRoutes);
 
-  // ── Entity Routes ─────────────────────────────────────────────────────
-  const entityRoutes: Array<{ path: string; name: string; service: EntityService }> = [
-    { path: '/api/entities/conversation-messages', name: 'ConversationMessage', service: new EntityService(conversationMessages) },
-    { path: '/api/entities/learning-records', name: 'LearningRecord', service: new EntityService(learningRecords) },
-    { path: '/api/entities/mistakes', name: 'Mistake', service: new EntityService(mistakes) },
-    { path: '/api/entities/missions', name: 'Mission', service: new EntityService(missions) },
-    { path: '/api/entities/notes', name: 'Note', service: new EntityService(notes) },
-    { path: '/api/entities/questions', name: 'Question', service: new EntityService(questions) },
-    { path: '/api/entities/portal-sessions', name: 'PortalSession', service: new EntityService(portalSessions) },
-    { path: '/api/entities/concepts', name: 'Concept', service: new EntityService(concepts) },
-    { path: '/api/entities/users', name: 'User', service: new EntityService(users) },
+  // Entity routes (all user-scoped)
+  const entityRoutes: Array<{ path: string; name: string; service: EntityService; userScoped: boolean }> = [
+    { path: '/api/entities/conversation-messages', name: 'ConversationMessage', service: new EntityService(conversationMessages), userScoped: true },
+    { path: '/api/entities/learning-records', name: 'LearningRecord', service: new EntityService(learningRecords), userScoped: true },
+    { path: '/api/entities/mistakes', name: 'Mistake', service: new EntityService(mistakes), userScoped: true },
+    { path: '/api/entities/missions', name: 'Mission', service: new EntityService(missions), userScoped: true },
+    { path: '/api/entities/notes', name: 'Note', service: new EntityService(notes), userScoped: true },
+    { path: '/api/entities/questions', name: 'Question', service: new EntityService(questions), userScoped: false },
+    { path: '/api/entities/portal-sessions', name: 'PortalSession', service: new EntityService(portalSessions), userScoped: true },
+    { path: '/api/entities/concepts', name: 'Concept', service: new EntityService(concepts), userScoped: false },
+    { path: '/api/entities/users', name: 'User', service: new EntityService(users), userScoped: false },
   ];
 
   for (const route of entityRoutes) {
-    await app.register(
-      async (instance) => {
-        await registerEntityRoutes(instance, {
-          basePath: '',
-          entityName: route.name,
-          service: route.service,
-        });
-      },
-      { prefix: route.path }
-    );
+    await app.register(async (instance) => {
+      await registerEntityRoutes(instance, {
+        basePath: '', entityName: route.name, service: route.service, userScoped: route.userScoped,
+      });
+    }, { prefix: route.path });
   }
 
-  // ── Serve Frontend Static Files ───────────────────────────────────────
-  // The frontend build output is at ../../dist (relative to server/src/)
+  // Serve frontend
   const distPath = path.join(__dirname, '../../dist');
-
   if (fs.existsSync(distPath)) {
-    await app.register(fastifyStatic, {
-      root: distPath,
-      prefix: '/',
-      decorateReply: true,
-    });
-
-    // SPA fallback: serve index.html for all non-API routes
+    await app.register(fastifyStatic, { root: distPath, prefix: '/', decorateReply: true });
     app.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith('/api/')) {
         return reply.status(404).send({ success: false, error: 'Not found' });
       }
       return reply.sendFile('index.html');
     });
-  } else {
-    console.warn('⚠️  Frontend dist/ not found. Serving API only.');
   }
 
   return app;
 }
 
-// ============================================================================
-// Start Server
-// ============================================================================
-
 async function start() {
   const env = getEnv();
   const app = await buildServer();
-
   try {
     await app.listen({ port: env.API_PORT, host: '0.0.0.0' });
     console.log(`\n🚀 Alpha Study running on http://localhost:${env.API_PORT}`);
-    console.log(`   Environment: ${env.APP_ENV}`);
-    console.log('');
   } catch (err) {
     app.log.error(err);
     process.exit(1);
   }
-
-  // Graceful shutdown
-  const shutdown = async () => {
-    console.log('\n🛑 Shutting down...');
-    await app.close();
-    await closeDb();
-    process.exit(0);
-  };
-
+  const shutdown = async () => { await app.close(); await closeDb(); process.exit(0); };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
 }

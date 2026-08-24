@@ -1,122 +1,72 @@
-// ============================================================================
-// Alpha Study API Client
-// Drop-in replacement for Base44 SDK entity operations
-// ============================================================================
-
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-// ============================================================================
-// Types
-// ============================================================================
-
-interface ApiResponse<T> {
-  success: boolean;
-  data?: T;
-  error?: string;
+function getToken() {
+  return localStorage.getItem('alpha_auth_token');
 }
 
-// ============================================================================
-// HTTP Client
-// ============================================================================
-
-async function request<T>(
-  method: string,
-  path: string,
-  body?: unknown
-): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const url = `${API_BASE}${path}`;
-  const options: RequestInit = {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-  };
-  if (body) {
-    options.body = JSON.stringify(body);
-  }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const options: RequestInit = { method, headers };
+  if (body) options.body = JSON.stringify(body);
 
   const res = await fetch(url, options);
-  const json = await res.json() as ApiResponse<T>;
+  const json = await res.json() as { success: boolean; data?: T; error?: string };
 
   if (!res.ok || !json.success) {
     throw new Error(json.error || `Request failed: ${res.status}`);
   }
-
   return json.data as T;
 }
 
-// ============================================================================
-// Entity Client — matches Base44 SDK patterns
-// ============================================================================
-
 class EntityClient {
   private basePath: string;
+  constructor(entityPath: string) { this.basePath = `/api/entities/${entityPath}`; }
 
-  constructor(entityPath: string) {
-    this.basePath = `/api/entities/${entityPath}`;
-  }
-
-  /**
-   * List records — matches db.entities.X.list(sort, limit)
-   */
-  async list(sort: string = '-created_at', limit: number = 200): Promise<any[]> {
+  async list(sort = '-created_at', limit = 200) {
     const params = new URLSearchParams({ sort, limit: String(limit) });
     return request<any[]>('GET', `${this.basePath}/list?${params}`);
   }
-
-  /**
-   * Get by ID — matches db.entities.X.get(id)
-   */
-  async get(id: string): Promise<any | null> {
-    try {
-      return await request<any>('GET', `${this.basePath}/${id}`);
-    } catch {
-      return null;
-    }
+  async get(id: string) {
+    try { return await request<any>('GET', `${this.basePath}/${id}`); } catch { return null; }
   }
-
-  /**
-   * Filter records — matches db.entities.X.filter(query, sort, limit)
-   */
-  async filter(
-    query: Record<string, unknown>,
-    sort: string = '-created_at',
-    limit: number = 100
-  ): Promise<any[]> {
+  async filter(query: Record<string, unknown>, sort = '-created_at', limit = 100) {
     const params = new URLSearchParams({ sort, limit: String(limit) });
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined && value !== null) {
-        params.set(key, String(value));
-      }
+    for (const [k, v] of Object.entries(query)) {
+      if (v !== undefined && v !== null) params.set(k, String(v));
     }
     return request<any[]>('GET', `${this.basePath}/filter?${params}`);
   }
-
-  /**
-   * Create — matches db.entities.X.create(data)
-   */
-  async create(data: Record<string, unknown>): Promise<any> {
-    return request<any>('POST', this.basePath, data);
-  }
-
-  /**
-   * Update — matches db.entities.X.update(id, data)
-   */
-  async update(id: string, data: Record<string, unknown>): Promise<any> {
-    return request<any>('PUT', `${this.basePath}/${id}`, data);
-  }
-
-  /**
-   * Delete — matches db.entities.X.delete(id)
-   */
-  async delete(id: string): Promise<void> {
-    await request('DELETE', `${this.basePath}/${id}`);
-  }
+  async create(data: Record<string, unknown>) { return request<any>('POST', this.basePath, data); }
+  async update(id: string, data: Record<string, unknown>) { return request<any>('PUT', `${this.basePath}/${id}`, data); }
+  async delete(id: string) { await request('DELETE', `${this.basePath}/${id}`); }
 }
 
-// ============================================================================
-// Entity Instances — drop-in replacements for Base44 SDK
-// ============================================================================
-
 export const db = {
+  auth: {
+    async register(email: string, password: string) {
+      const data = await request<any>('POST', '/api/auth/register', { email, password });
+      localStorage.setItem('alpha_auth_token', data.token);
+      localStorage.setItem('alpha_auth_user', JSON.stringify(data.user));
+      return data;
+    },
+    async login(email: string, password: string) {
+      const data = await request<any>('POST', '/api/auth/login', { email, password });
+      localStorage.setItem('alpha_auth_token', data.token);
+      localStorage.setItem('alpha_auth_user', JSON.stringify(data.user));
+      return data;
+    },
+    logout() {
+      localStorage.removeItem('alpha_auth_token');
+      localStorage.removeItem('alpha_auth_user');
+    },
+    async me() {
+      return request<any>('GET', '/api/auth/me');
+    },
+  },
   entities: {
     ConversationMessage: new EntityClient('conversation-messages'),
     LearningRecord: new EntityClient('learning-records'),
@@ -127,6 +77,26 @@ export const db = {
     PortalSession: new EntityClient('portal-sessions'),
     Concept: new EntityClient('concepts'),
     User: new EntityClient('users'),
+  },
+  llm: {
+    async invoke(prompt: string, response_json_schema?: any) {
+      return request<any>('POST', '/api/llm/invoke', { prompt, response_json_schema });
+    },
+  },
+  aloc: {
+    async questions(params: { subject?: string; examType?: string; year?: string; limit?: number }) {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(params)) {
+        if (v !== undefined) qs.set(k, String(v));
+      }
+      return request<any>('GET', `/api/aloc/questions?${qs}`);
+    },
+    async health() {
+      return request<any>('GET', '/api/aloc/health');
+    },
+    async sync(body: { subject?: string; examType?: string; year?: string }) {
+      return request<any>('POST', '/api/aloc/sync', body);
+    },
   },
 };
 

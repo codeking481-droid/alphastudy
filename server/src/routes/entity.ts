@@ -1,48 +1,47 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { EntityService } from '../services/entity.js';
-
-// ============================================================================
-// Generic Entity Routes — matches Base44 SDK entity operations
-// ============================================================================
+import { authMiddleware } from './auth.js';
 
 interface EntityRouteOptions {
-  basePath: string;        // e.g. '/api/entities/conversation-messages'
-  entityName: string;      // e.g. 'ConversationMessage'
-  service: EntityService;
+  basePath: string;
+  entityName: string;
+  service: any;
+  userScoped?: boolean;
 }
 
 export async function registerEntityRoutes(
   app: FastifyInstance,
   options: EntityRouteOptions
 ) {
-  const { basePath, entityName, service } = options;
+  const { basePath, entityName, service, userScoped = true } = options;
 
-  // ── LIST ──────────────────────────────────────────────────────────────
-  // GET /api/entities/:entity/list?sort=-created_date&limit=200
+  // All entity routes require auth
+  app.addHook('preHandler', authMiddleware);
+
+  // ── LIST ──────────────────────────────────────────────────────────
   app.get(`${basePath}/list`, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { sort, limit } = request.query as { sort?: string; limit?: string };
-      const result = await service.list(
-        sort || '-created_at',
-        limit ? parseInt(limit, 10) : 200
-      );
+      const userId = (request as any).user?.userId;
+
+      let result;
+      if (userScoped && userId) {
+        result = await service.listByUser(userId, sort || '-created_at', limit ? parseInt(limit, 10) : 200);
+      } else {
+        result = await service.list(sort || '-created_at', limit ? parseInt(limit, 10) : 200);
+      }
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(500).send({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
 
-  // ── FILTER ────────────────────────────────────────────────────────────
-  // GET /api/entities/:entity/filter?concept=X&sort=-created_date&limit=100
+  // ── FILTER ────────────────────────────────────────────────────────
   app.get(`${basePath}/filter`, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const query = request.query as Record<string, string>;
       const { sort, limit, ...filters } = query;
+      const userId = (request as any).user?.userId;
 
-      // Parse filter values (try to parse numbers and booleans)
       const parsedFilters: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(filters)) {
         if (key === 'sort' || key === 'limit') continue;
@@ -52,58 +51,50 @@ export async function registerEntityRoutes(
         else parsedFilters[key] = value;
       }
 
-      const result = await service.filter(
-        parsedFilters,
-        sort || '-created_at',
-        limit ? parseInt(limit, 10) : 100
-      );
+      let result;
+      if (userScoped && userId) {
+        result = await service.filterByUser(userId, parsedFilters, sort || '-created_at', limit ? parseInt(limit, 10) : 100);
+      } else {
+        result = await service.filter(parsedFilters, sort || '-created_at', limit ? parseInt(limit, 10) : 100);
+      }
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(500).send({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
 
-  // ── GET BY ID ─────────────────────────────────────────────────────────
-  // GET /api/entities/:entity/:id
+  // ── GET BY ID ─────────────────────────────────────────────────────
   app.get(`${basePath}/:id`, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id } = request.params as { id: string };
       const result = await service.get(id);
       if (!result) {
-        return reply.status(404).send({
-          success: false,
-          error: `${entityName} not found`,
-        });
+        return reply.status(404).send({ success: false, error: `${entityName} not found` });
       }
       return reply.send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(500).send({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
 
-  // ── CREATE ────────────────────────────────────────────────────────────
-  // POST /api/entities/:entity
+  // ── CREATE ────────────────────────────────────────────────────────
   app.post(`${basePath}`, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const data = request.body as any;
+      const userId = (request as any).user?.userId;
+
+      if (userScoped && userId) {
+        data.userId = userId;
+      }
+
       const result = await service.create(data);
       return reply.status(201).send({ success: true, data: result });
     } catch (error: any) {
-      return reply.status(400).send({
-        success: false,
-        error: error.message || 'Invalid data',
-      });
+      return reply.status(400).send({ success: false, error: error.message });
     }
   });
 
-  // ── UPDATE ────────────────────────────────────────────────────────────
-  // PUT /api/entities/:entity/:id
+  // ── UPDATE ────────────────────────────────────────────────────────
   app.put(`${basePath}/:id`, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id } = request.params as { id: string };
@@ -112,20 +103,13 @@ export async function registerEntityRoutes(
       return reply.send({ success: true, data: result });
     } catch (error: any) {
       if (error.message?.includes('not found')) {
-        return reply.status(404).send({
-          success: false,
-          error: error.message,
-        });
+        return reply.status(404).send({ success: false, error: error.message });
       }
-      return reply.status(400).send({
-        success: false,
-        error: error.message || 'Invalid data',
-      });
+      return reply.status(400).send({ success: false, error: error.message });
     }
   });
 
-  // ── DELETE ────────────────────────────────────────────────────────────
-  // DELETE /api/entities/:entity/:id
+  // ── DELETE ────────────────────────────────────────────────────────
   app.delete(`${basePath}/:id`, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const { id } = request.params as { id: string };
@@ -133,15 +117,9 @@ export async function registerEntityRoutes(
       return reply.send({ success: true });
     } catch (error: any) {
       if (error.message?.includes('not found')) {
-        return reply.status(404).send({
-          success: false,
-          error: error.message,
-        });
+        return reply.status(404).send({ success: false, error: error.message });
       }
-      return reply.status(500).send({
-        success: false,
-        error: error.message || 'Internal server error',
-      });
+      return reply.status(500).send({ success: false, error: error.message });
     }
   });
 }
