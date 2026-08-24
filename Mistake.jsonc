@@ -1,0 +1,40 @@
+{
+  "name": "Mistake",
+  "type": "object",
+  "properties": {
+    "concept": {
+      "type": "string"
+    },
+    "question_text": {
+      "type": "string"
+    },
+    "student_answer": {
+      "type": "string"
+    },
+    "correct_answer": {
+      "type": "string"
+    },
+    "pattern": {
+      "type": "string",
+      "enum": [
+        "sign_error",
+        "formula_confusion",
+        "misreading",
+        "concept_confusion",
+        "forgotten_prerequisite",
+        "calculation_error",
+        "careless",
+        "time_pressure",
+        "unknown"
+      ],
+      "default": "unknown"
+    },
+    "portal_type": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "concept",
+    "question_text"
+  ]
+}

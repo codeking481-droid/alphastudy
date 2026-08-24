@@ -1,0 +1,43 @@
+{
+  "name": "ConversationMessage",
+  "type": "object",
+  "properties": {
+    "role": {
+      "type": "string",
+      "enum": [
+        "user",
+        "alpha",
+        "system"
+      ]
+    },
+    "content": {
+      "type": "string"
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "note_offer": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "attachments": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "kind": {
+      "type": "string",
+      "default": "message"
+    }
+  },
+  "required": [
+    "role",
+    "content"
+  ]
+}

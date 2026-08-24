@@ -1,0 +1,60 @@
+{
+  "name": "Mission",
+  "type": "object",
+  "properties": {
+    "goal": {
+      "type": "string"
+    },
+    "exam": {
+      "type": "string"
+    },
+    "deadline": {
+      "type": "string"
+    },
+    "total_minutes": {
+      "type": "integer"
+    },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "portal": {
+            "type": "string"
+          },
+          "concept": {
+            "type": "string"
+          },
+          "duration_minutes": {
+            "type": "integer"
+          },
+          "question_count": {
+            "type": "integer"
+          },
+          "difficulty": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "current_step": {
+      "type": "integer",
+      "default": 0
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "completed",
+        "abandoned"
+      ],
+      "default": "active"
+    }
+  },
+  "required": [
+    "goal"
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "name": "LearningRecord",
+  "type": "object",
+  "properties": {
+    "concept": {
+      "type": "string"
+    },
+    "exam": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "not_started",
+        "learning",
+        "practiced",
+        "mastered",
+        "needs_review"
+      ],
+      "default": "not_started"
+    },
+    "attempts": {
+      "type": "integer",
+      "default": 0
+    },
+    "correct": {
+      "type": "integer",
+      "default": 0
+    },
+    "last_score": {
+      "type": "number",
+      "default": 0
+    },
+    "mastery_score": {
+      "type": "number",
+      "default": 0
+    },
+    "streak": {
+      "type": "integer",
+      "default": 0
+    },
+    "last_reviewed": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "next_review": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "preferred_style": {
+      "type": "string"
+    },
+    "weak_patterns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "seen_questions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "concept"
+  ]
+}

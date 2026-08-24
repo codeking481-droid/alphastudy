@@ -1,0 +1,43 @@
+{
+  "name": "PortalSession",
+  "type": "object",
+  "properties": {
+    "portal_type": {
+      "type": "string",
+      "enum": [
+        "lesson",
+        "quiz",
+        "exam",
+        "mistake_clinic",
+        "review",
+        "challenge",
+        "image",
+        "document",
+        "voice"
+      ]
+    },
+    "concept": {
+      "type": "string"
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "completed",
+        "abandoned"
+      ],
+      "default": "active"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "portal_type"
+  ]
+}

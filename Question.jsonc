@@ -1,0 +1,64 @@
+{
+  "name": "Question",
+  "type": "object",
+  "properties": {
+    "concept": {
+      "type": "string"
+    },
+    "exam": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    },
+    "topic": {
+      "type": "string"
+    },
+    "question_text": {
+      "type": "string"
+    },
+    "options": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "correct_index": {
+      "type": "integer"
+    },
+    "explanation": {
+      "type": "string"
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": [
+        "beginner",
+        "intermediate",
+        "advanced",
+        "exam",
+        "challenge"
+      ],
+      "default": "intermediate"
+    },
+    "provenance": {
+      "type": "string",
+      "enum": [
+        "verified_official",
+        "third_party_sourced",
+        "authored_practice",
+        "ai_generated",
+        "unknown"
+      ],
+      "default": "authored_practice"
+    },
+    "source_label": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "question_text",
+    "options",
+    "correct_index",
+    "provenance"
+  ]
+}
