@@ -1,11 +1,17 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
-
 import React, { useState, useRef } from "react";
 import { Send, Mic, X, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-
 import { getRecognition } from "@/lib/voice";
+
+function fileToDataURL(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function ChatInput({ onSend, thinking }) {
   const [text, setText] = useState("");
@@ -16,6 +22,7 @@ export default function ChatInput({ onSend, thinking }) {
   const submit = () => {
     if (thinking) return;
     if (!text.trim() && pending.length === 0) return;
+    // Send file data URLs as attachments (Groq supports base64 images)
     onSend(text.trim(), pending.map((p) => p.url));
     setText("");
     setPending([]);
@@ -25,10 +32,10 @@ export default function ChatInput({ onSend, thinking }) {
     const files = Array.from(e.target.files || []);
     for (const f of files) {
       try {
-        const { file_url } = await db.integrations.Core.UploadFile({ file: f });
-        setPending((p) => [...p, { url: file_url, name: f.name }]);
+        const dataUrl = await fileToDataURL(f);
+        setPending((p) => [...p, { url: dataUrl, name: f.name }]);
       } catch (err) {
-        /* ignore failed upload */
+        console.error("Failed to read file:", err);
       }
     }
     e.target.value = "";

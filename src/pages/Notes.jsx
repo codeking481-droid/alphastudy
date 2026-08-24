@@ -1,24 +1,32 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
-
 import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-
 import { Notebook, Trash2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Markdown from "@/components/alpha/Markdown";
+
+function loadNotes() {
+  try {
+    return JSON.parse(localStorage.getItem("alpha_notes") || "[]");
+  } catch { return []; }
+}
+
+function saveNotes(notes) {
+  localStorage.setItem("alpha_notes", JSON.stringify(notes));
+}
 
 export default function Notes() {
   const [notes, setNotes] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const load = () =>
-    db.entities.Note.list("-created_date", 200).then((n) => { setNotes(n); setLoading(false); });
+  useEffect(() => {
+    setNotes(loadNotes());
+    setLoading(false);
+  }, []);
 
-  useEffect(() => { load(); }, []);
-
-  const del = async (id) => {
-    await db.entities.Note.delete(id);
-    load();
+  const del = (id) => {
+    const updated = notes.filter((n) => n.id !== id);
+    setNotes(updated);
+    saveNotes(updated);
   };
 
   return (

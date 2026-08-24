@@ -1,53 +1,67 @@
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 async function invokeLLM({ prompt, response_json_schema }) {
-  const res = await fetch(`${API_BASE}/api/llm/invoke`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, response_json_schema }),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'LLM request failed' }));
-    throw new Error(err.error || 'LLM request failed');
+  if (!GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY not configured. Add VITE_GROQ_API_KEY to your environment.');
   }
-  const json = await res.json();
-  return json.data;
+
+  const body = {
+    model: 'llama-3.3-70b-versatile',
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.7,
+    max_tokens: 4096,
+  };
+
+  if (response_json_schema) {
+    body.response_format = { type: 'json_object' };
+  }
+
+  const res = await fetch(GROQ_API_URL, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${GROQ_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    console.error('Groq API error:', res.status, err);
+    throw new Error(`AI request failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  const content = data.choices?.[0]?.message?.content || '';
+
+  if (response_json_schema) {
+    try {
+      let jsonStr = content;
+      const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (match) jsonStr = match[1].trim();
+      const firstBrace = jsonStr.indexOf('{');
+      const lastBrace = jsonStr.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace !== -1) {
+        jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+      }
+      return JSON.parse(jsonStr);
+    } catch {
+      return { questions: [] };
+    }
+  }
+
+  return content;
 }
 
 function shuffle(a) {
   return [...a].sort(() => Math.random() - 0.5);
 }
 
-// Question supply with honest provenance. Falls back to AI-generated
-// questions that are EXPLICITLY labeled as AI-generated (never official).
 export async function fetchQuestions({ concept, difficulty, count, exam, subject }) {
-  // Try to load existing questions from DB (will be empty until DB is connected)
-  let qs = [];
-  try {
-    const API_BASE = import.meta.env.VITE_API_URL || '';
-    const res = await fetch(`${API_BASE}/api/entities/questions/filter?concept=${encodeURIComponent(concept)}&sort=-created_date&limit=100`);
-    if (res.ok) {
-      const json = await res.json();
-      qs = json.data || [];
-    }
-  } catch {
-    // DB not connected yet, fall through to AI generation
-  }
-
-  // Filter by difficulty
-  if (difficulty && difficulty !== "exam" && difficulty !== "challenge") {
-    qs = qs.filter((q) => !q.difficulty || q.difficulty === difficulty);
-  } else if (difficulty === "challenge") {
-    qs = qs.filter((q) => q.difficulty === "challenge" || q.difficulty === "advanced" || q.difficulty === "exam");
-  }
-
-  qs = shuffle(qs);
-  if (qs.length < count) {
-    const need = count - qs.length;
-    const gen = await generateQuestions({ concept, difficulty, count: need, exam, subject });
-    qs = [...qs, ...gen];
-  }
-  return qs.slice(0, count);
+  // Always generate via AI (DB not connected yet)
+  const gen = await generateQuestions({ concept, difficulty, count, exam, subject });
+  return gen;
 }
 
 export async function generateQuestions({ concept, difficulty, count, exam, subject }) {

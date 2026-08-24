@@ -1,8 +1,5 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
-
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
-
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, Volume2, VolumeX, Notebook } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,10 +8,39 @@ import ChatMessage from "@/components/alpha/ChatMessage";
 import ChatInput from "@/components/alpha/ChatInput";
 import PortalRouter from "@/components/portals/PortalRouter";
 import { getAlphaResponse, analyzeResult, welcomeBack } from "@/lib/alphaEngine";
-import { fetchMemory, buildMemorySummary, recordAttempt, recordMistakes, markLearningStarted, saveNote, getDueReviews } from "@/lib/learning";
 import { buildEvidenceReport } from "@/lib/report";
 import { speak } from "@/lib/voice";
 
+// ── Local Storage Helpers ──────────────────────────────────────────────
+const STORAGE_KEY = "alpha_conversation";
+const MEMORY_KEY = "alpha_memory";
+
+function loadMessages() {
+  try {
+    return JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
+  } catch { return []; }
+}
+
+function saveMessages(msgs) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(msgs));
+}
+
+function loadMemory() {
+  try {
+    return JSON.parse(localStorage.getItem(MEMORY_KEY) || '{"records":[],"mistakes":[]}');
+  } catch { return { records: [], mistakes: [] }; }
+}
+
+function saveMemory(mem) {
+  localStorage.setItem(MEMORY_KEY, JSON.stringify(mem));
+}
+
+let _msgId = Date.now();
+function makeMsg(role, content, extra = {}) {
+  return { id: String(++_msgId), role, content, createdAt: new Date().toISOString(), ...extra };
+}
+
+// ── Alpha Thinking Animation ───────────────────────────────────────────
 function AlphaThinking() {
   return (
     <div className="flex gap-3">
@@ -30,6 +56,7 @@ function AlphaThinking() {
   );
 }
 
+// ── Main Home Component ────────────────────────────────────────────────
 export default function Home() {
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -41,141 +68,122 @@ export default function Home() {
   const scrollRef = useRef(null);
   const welcomedRef = useRef(false);
 
-  const loadMessages = useCallback(async () => {
-    try {
-      const list = await db.entities.ConversationMessage.list("created_date", 200);
-      if (list.length === 0) {
-        const greeting = await db.entities.ConversationMessage.create({
-          role: "alpha",
-          content:
-            "Hi, I'm **Alpha** — your personal learning orchestrator. 🌟\n\nTell me what you're preparing for — **JAMB**, **WAEC** or **NECO** — and a subject or topic. Or just say *\"help me prepare for JAMB\"* and I'll take it from here.\n\nI'll teach you, test you, watch how you do, fix your mistakes, and decide what's next. You just keep moving forward.",
-          kind: "message",
-        });
-        setMessages([greeting]);
-      } else {
-        setMessages(list);
-        if (!welcomedRef.current) {
-          welcomedRef.current = true;
-          (async () => {
-            try {
-              const memory = await fetchMemory();
-              const due = await getDueReviews();
-              const memorySummary = buildMemorySummary(memory, due);
-              const res = await welcomeBack({ memorySummary, dueReviews: due });
-              const msg = await db.entities.ConversationMessage.create({
-                role: "alpha",
-                content: res.reply || "Welcome back.",
-                action: res.action || null,
-                kind: "message",
-              });
-              setMessages((m) => [...m, msg]);
-              if (res.action && res.action.mission) {
-                const mission = await db.entities.Mission.create({
-                  goal: res.action.mission.goal,
-                  exam: res.action.exam,
-                  deadline: res.action.mission.deadline,
-                  total_minutes: res.action.mission.total_minutes,
-                  steps: res.action.mission.steps,
-                  current_step: 0,
-                  status: "active",
-                });
-                setActiveMission(mission);
-              }
-            } catch (e) {}
-          })();
-        }
+  // Load messages from localStorage on mount
+  const loadMessagesFromStorage = useCallback(() => {
+    const stored = loadMessages();
+    if (stored.length === 0) {
+      const greeting = makeMsg("alpha",
+        "Hi, I'm **Alpha** — your personal learning orchestrator. 🌟\n\nTell me what you're preparing for — **JAMB**, **WAEC** or **NECO** — and a subject or topic. Or just say *\"help me prepare for JAMB\"* and I'll take it from here.\n\nI'll teach you, test you, watch how you do, fix your mistakes, and decide what's next. You just keep moving forward."
+      );
+      setMessages([greeting]);
+      saveMessages([greeting]);
+    } else {
+      setMessages(stored);
+      // Welcome back with AI
+      if (!welcomedRef.current && stored.length > 0) {
+        welcomedRef.current = true;
+        (async () => {
+          try {
+            const memory = loadMemory();
+            const res = await welcomeBack({ memorySummary: JSON.stringify(memory), dueReviews: [] });
+            const msg = makeMsg("alpha", res.reply || "Welcome back.", { action: res.action || null });
+            setMessages((m) => { const next = [...m, msg]; saveMessages(next); return next; });
+          } catch (e) { /* ignore */ }
+        })();
       }
-    } catch (e) {
-      setMessages([]);
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   }, []);
 
-  useEffect(() => { loadMessages(); }, [loadMessages]);
-  useEffect(() => { getDueReviews().then(setDueReviews).catch(() => {}); }, []);
+  useEffect(() => { loadMessagesFromStorage(); }, [loadMessagesFromStorage]);
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages, thinking]);
 
+  // ── Send Message ───────────────────────────────────────────────────
   const send = async (text, attachments = []) => {
-    const userMsg = await db.entities.ConversationMessage.create({
-      role: "user",
-      content: text,
-      attachments,
-    });
-    setMessages((m) => [...m, userMsg]);
+    const userMsg = makeMsg("user", text, { attachments });
+    const afterUser = [...messages, userMsg];
+    setMessages(afterUser);
+    saveMessages(afterUser);
     setThinking(true);
+
     try {
-      const memory = await fetchMemory();
-      const memorySummary = buildMemorySummary(memory, dueReviews);
-      const history = messages.slice(-10).map((m) => ({ role: m.role, content: m.content }));
+      const memory = loadMemory();
+      const memorySummary = JSON.stringify(memory);
+      const history = afterUser.slice(-10).map((m) => ({ role: m.role, content: m.content }));
       const res = await getAlphaResponse({ userMessage: text, history, memorySummary, attachments });
-      const alphaMsg = await db.entities.ConversationMessage.create({
-        role: "alpha",
-        content: res.reply || "…",
+      const alphaMsg = makeMsg("alpha", res.reply || "…", {
         action: res.action || null,
         note_offer: res.note_offer || null,
-        kind: "message",
       });
-      setMessages((m) => [...m, alphaMsg]);
+      setMessages((m) => { const next = [...m, alphaMsg]; saveMessages(next); return next; });
       if (ttsOn) speak(res.reply);
     } catch (e) {
-      const errMsg = await db.entities.ConversationMessage.create({
-        role: "alpha",
-        content: "I hit a small snag just now. Let's try that again — could you rephrase?",
-      });
-      setMessages((m) => [...m, errMsg]);
+      console.error("Alpha response error:", e);
+      const errMsg = makeMsg("alpha", "I hit a small snag just now. Let's try that again — could you rephrase?");
+      setMessages((m) => { const next = [...m, errMsg]; saveMessages(next); return next; });
     } finally {
       setThinking(false);
     }
   };
 
+  // ── Handle Portal Action ───────────────────────────────────────────
   const handleAction = async (action) => {
     if (!action || action.type !== "portal") return;
     if (action.mission) {
-      try {
-        const mission = await db.entities.Mission.create({
-          goal: action.mission.goal,
-          exam: action.exam,
-          deadline: action.mission.deadline,
-          total_minutes: action.mission.total_minutes,
-          steps: action.mission.steps,
-          current_step: 0,
-          status: "active",
-        });
-        setActiveMission(mission);
-      } catch (e) {}
+      setActiveMission({
+        id: String(Date.now()),
+        goal: action.mission.goal,
+        exam: action.exam,
+        deadline: action.mission.deadline,
+        total_minutes: action.mission.total_minutes,
+        steps: action.mission.steps,
+        current_step: 0,
+        status: "active",
+      });
     }
-    const session = await db.entities.PortalSession.create({
-      portal_type: action.portal,
-      concept: action.concept,
+    setActivePortal({
+      type: action.portal,
       config: action,
-      status: "active",
+      sessionId: String(Date.now()),
     });
-    setActivePortal({ type: action.portal, config: action, sessionId: session.id });
   };
 
+  // ── Portal Complete ────────────────────────────────────────────────
   const handlePortalComplete = async (result) => {
     const cfg = activePortal.config;
     const portalType = activePortal.type;
-    const sessionId = activePortal.sessionId;
 
-    const memory = await fetchMemory();
-    const prevRecord = memory.records.find((r) => r.concept === cfg.concept);
-
-    if (result.learned) {
-      try { await markLearningStarted(cfg); } catch (e) {}
-    } else if (!result.aborted && cfg.concept) {
-      try {
-        await recordAttempt(cfg, result);
-        await recordMistakes(cfg, result.mistakes || [], portalType);
-      } catch (e) {}
+    // Update memory
+    const memory = loadMemory();
+    if (!result.learned && !result.aborted && cfg.concept) {
+      const existing = memory.records.find((r) => r.concept === cfg.concept);
+      if (existing) {
+        existing.attempts = (existing.attempts || 0) + 1;
+        existing.correct = (existing.correct || 0) + (result.correct || 0);
+        existing.last_score = result.score || 0;
+        existing.streak = result.score >= 70 ? (existing.streak || 0) + 1 : 0;
+      } else {
+        memory.records.push({
+          concept: cfg.concept,
+          attempts: 1,
+          correct: result.correct || 0,
+          last_score: result.score || 0,
+          streak: result.score >= 70 ? 1 : 0,
+          status: result.score >= 80 ? "mastered" : "learning",
+        });
+      }
+      if (result.mistakes) {
+        result.mistakes.forEach((m) => {
+          memory.mistakes.push({ concept: cfg.concept, pattern: "concept_confusion", date: new Date().toISOString() });
+        });
+      }
+      saveMemory(memory);
     }
 
-    const evidence = buildEvidenceReport(cfg, result, prevRecord);
-    try { await db.entities.PortalSession.update(sessionId, { status: "completed", result }); } catch (e) {}
+    const evidence = buildEvidenceReport(cfg, result, null);
 
     let missionState = activeMission;
     if (activeMission) {
@@ -183,7 +191,6 @@ export default function Home() {
       if (step && step.concept === cfg.concept) {
         const nextStep = activeMission.current_step + 1;
         const done = nextStep >= (activeMission.steps?.length || 0);
-        try { await db.entities.Mission.update(activeMission.id, { current_step: nextStep, status: done ? "completed" : "active" }); } catch (e) {}
         missionState = done ? null : { ...activeMission, current_step: nextStep };
         setActiveMission(missionState);
       }
@@ -192,33 +199,28 @@ export default function Home() {
     setActivePortal(null);
     setThinking(true);
     try {
-      const memorySummary = buildMemorySummary(await fetchMemory(), []);
+      const memorySummary = JSON.stringify(loadMemory());
       const res = await analyzeResult({ portalType, config: cfg, result, evidence, memorySummary, mission: missionState });
-      const msg = await db.entities.ConversationMessage.create({
-        role: "alpha",
-        content: res.reply || "Nice work. What's next?",
+      const msg = makeMsg("alpha", res.reply || "Nice work. What's next?", {
         action: res.action || null,
         report: evidence,
-        kind: "message",
       });
-      setMessages((m) => [...m, msg]);
+      setMessages((m) => { const next = [...m, msg]; saveMessages(next); return next; });
       if (ttsOn) speak(res.reply);
     } catch (e) {
+      console.error("Post-portal analysis error:", e);
     } finally {
       setThinking(false);
     }
   };
 
-  const handlePortalExit = async () => {
-    if (activePortal?.sessionId) {
-      try { await db.entities.PortalSession.update(activePortal.sessionId, { status: "abandoned" }); } catch (e) {}
-    }
-    setActivePortal(null);
-  };
+  const handlePortalExit = () => { setActivePortal(null); };
 
-  const handleSaveNote = async (note) => {
+  const handleSaveNote = (note) => {
     try {
-      await saveNote(note);
+      const notes = JSON.parse(localStorage.getItem("alpha_notes") || "[]");
+      notes.push({ id: String(Date.now()), ...note, createdAt: new Date().toISOString() });
+      localStorage.setItem("alpha_notes", JSON.stringify(notes));
     } catch (e) { /* ignore */ }
   };
 
