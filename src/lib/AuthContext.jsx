@@ -35,8 +35,8 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
-  const register = async (email, password) => {
-    const data = await db.auth.register(email, password);
+  const register = async (payload) => {
+    const data = await db.auth.register(payload);
     setUser(data.user);
     setIsAuthenticated(true);
     return data;

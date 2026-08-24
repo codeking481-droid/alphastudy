@@ -14,7 +14,29 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (body) options.body = JSON.stringify(body);
 
   const res = await fetch(url, options);
-  const json = await res.json() as { success: boolean; data?: T; error?: string };
+
+  // Read the raw text first so we can handle both JSON and non-JSON responses
+  const text = await res.text();
+
+  // Check if the response is HTML (server returned a page instead of JSON)
+  const contentType = res.headers.get('content-type') || '';
+  if (contentType.includes('text/html') || text.trimStart().startsWith('<!') || text.trimStart().startsWith('<html')) {
+    throw new Error(
+      `Server returned an HTML page instead of JSON for ${method} ${path}. ` +
+      `The API server may be down or the endpoint ${path} does not exist. ` +
+      `Make sure the backend server is running and connected to the database.`
+    );
+  }
+
+  let json: any;
+  try {
+    json = JSON.parse(text) as { success: boolean; data?: T; error?: string };
+  } catch {
+    throw new Error(
+      `Invalid JSON response from ${method} ${path}. ` +
+      `The server returned: "${text.substring(0, 200)}"`
+    );
+  }
 
   if (!res.ok || !json.success) {
     throw new Error(json.error || `Request failed: ${res.status}`);
@@ -47,8 +69,8 @@ class EntityClient {
 
 export const db = {
   auth: {
-    async register(email: string, password: string) {
-      const data = await request<any>('POST', '/api/auth/register', { email, password });
+    async register(payload: { email: string; password: string; firstName?: string; middleName?: string; lastName?: string }) {
+      const data = await request<any>('POST', '/api/auth/register', payload);
       localStorage.setItem('alpha_auth_token', data.token);
       localStorage.setItem('alpha_auth_user', JSON.stringify(data.user));
       return data;
@@ -66,6 +88,12 @@ export const db = {
     async me() {
       return request<any>('GET', '/api/auth/me');
     },
+    async forgotPassword(email: string) {
+      return request<any>('POST', '/api/auth/forgot-password', { email });
+    },
+    async resetPassword(resetToken: string, newPassword: string) {
+      return request<any>('POST', '/api/auth/reset-password', { resetToken, newPassword });
+    },
   },
   entities: {
     ConversationMessage: new EntityClient('conversation-messages'),
@@ -77,6 +105,7 @@ export const db = {
     PortalSession: new EntityClient('portal-sessions'),
     Concept: new EntityClient('concepts'),
     User: new EntityClient('users'),
+    ReasoningTranscript: new EntityClient('reasoning-transcripts'),
   },
   llm: {
     async invoke(prompt: string, response_json_schema?: any) {
@@ -96,6 +125,17 @@ export const db = {
     },
     async sync(body: { subject?: string; examType?: string; year?: string }) {
       return request<any>('POST', '/api/aloc/sync', body);
+    },
+  },
+  curriculum: {
+    async getExams() {
+      return request<any>('GET', '/api/curriculum/exams');
+    },
+    async getExam(code: string) {
+      return request<any>('GET', `/api/curriculum/exams/${code}`);
+    },
+    async getSubjects(code: string) {
+      return request<any>('GET', `/api/curriculum/exams/${code}/subjects`);
     },
   },
 };

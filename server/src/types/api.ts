@@ -34,6 +34,9 @@ export interface PaginatedResponse<T> extends ApiResponse<T[]> {
 export interface CreateUserInput {
   email: string;
   password?: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
   role?: 'admin' | 'user';
 }
 

@@ -41,6 +41,33 @@ export function buildMemorySummary({ records, mistakes, concepts }, dueReviews) 
   s += `- Recurring mistake patterns: ${topPatterns || "none"}\n`;
   s += `- Preferred explanation style: ${style || "unknown"}`;
   if (dueReviews && dueReviews.length) s += `\n- Due for spaced review now: ${dueReviews.map((r) => r.concept).join(", ")}`;
+
+  // Exam-specific memory
+  const examGroups = {};
+  records.forEach((r) => {
+    if (r.exam) {
+      if (!examGroups[r.exam]) examGroups[r.exam] = {};
+      if (r.subject) {
+        if (!examGroups[r.exam][r.subject]) examGroups[r.exam][r.subject] = [];
+        examGroups[r.exam][r.subject].push(r);
+      }
+    }
+  });
+
+  for (const [exam, subjects] of Object.entries(examGroups)) {
+    s += `\n\nEXAM: ${exam}`;
+    for (const [subject, subjRecords] of Object.entries(subjects)) {
+      const avgMastery = Math.round(subjRecords.reduce((sum, r) => sum + (r.mastery_score || 0), 0) / subjRecords.length);
+      const avgScore = subjRecords.filter(r => r.last_score > 0).length
+        ? Math.round(subjRecords.filter(r => r.last_score > 0).reduce((sum, r) => sum + r.last_score, 0) / subjRecords.filter(r => r.last_score > 0).length)
+        : 0;
+      const masteredCount = subjRecords.filter(r => r.status === "mastered").length;
+      const weakCount = subjRecords.filter(r => r.status === "needs_review").length;
+      const totalAttempts = subjRecords.reduce((sum, r) => sum + (r.attempts || 0), 0);
+      s += `\n  ${subject}: mastery ${avgMastery}%, last score ${avgScore}%, ${masteredCount} mastered, ${weakCount} weak, ${totalAttempts} total attempts`;
+    }
+  }
+
   return s;
 }
 

@@ -1,0 +1,45 @@
+services:
+  # ── API Server + Frontend (single service) ──────────────────────────────
+  - type: web
+    name: alpha-study
+    runtime: node
+    plan: free
+    buildCommand: |
+      # Build server
+      cd server && npm install && npm run build
+      # Build frontend
+      cd .. && npm install && npm run build
+      # Copy frontend build into server's dist/ so server can serve it
+      cp -r dist server/dist
+    startCommand: cd server && node dist/index.js
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: alpha-study-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+        secret: true
+      - key: APP_ENV
+        value: production
+      - key: CORS_ORIGIN
+        value: https://alpha-study.onrender.com
+      - key: LOG_LEVEL
+        value: info
+      - key: NODE_ENV
+        value: production
+      - key: API_PORT
+        value: 10000
+      - key: GROQ_API_KEY
+        sync: false
+      - key: ALOC_API_KEY
+        sync: false
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+# ── PostgreSQL Database ──────────────────────────────────────────────────
+databases:
+  - name: alpha-study-db
+    plan: free
+    databaseName: alpha_study
+    ipAllowList: []

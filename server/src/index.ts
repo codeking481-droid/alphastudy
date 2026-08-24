@@ -8,10 +8,11 @@ import { healthRoutes } from './routes/health.js';
 import { llmRoutes } from './routes/llm.js';
 import { authRoutes } from './routes/auth.js';
 import { alocRoutes } from './routes/aloc.js';
+import { curriculumRoutes } from './routes/curriculum.js';
 import { registerEntityRoutes } from './routes/entity.js';
 import {
   conversationMessages, learningRecords, mistakes, missions,
-  notes, questions, portalSessions, concepts, users,
+  notes, questions, portalSessions, concepts, users, reasoningTranscripts,
 } from './repositories/index.js';
 import { EntityService } from './services/entity.js';
 import path from 'path';
@@ -40,6 +41,7 @@ async function buildServer() {
   await app.register(llmRoutes);
   await app.register(authRoutes);
   await app.register(alocRoutes);
+  await app.register(curriculumRoutes);
 
   // Entity routes (all user-scoped)
   const entityRoutes: Array<{ path: string; name: string; service: EntityService; userScoped: boolean }> = [
@@ -52,6 +54,7 @@ async function buildServer() {
     { path: '/api/entities/portal-sessions', name: 'PortalSession', service: new EntityService(portalSessions), userScoped: true },
     { path: '/api/entities/concepts', name: 'Concept', service: new EntityService(concepts), userScoped: false },
     { path: '/api/entities/users', name: 'User', service: new EntityService(users), userScoped: false },
+    { path: '/api/entities/reasoning-transcripts', name: 'ReasoningTranscript', service: new EntityService(reasoningTranscripts), userScoped: true },
   ];
 
   for (const route of entityRoutes) {
@@ -62,9 +65,15 @@ async function buildServer() {
     }, { prefix: route.path });
   }
 
-  // Serve frontend
-  const distPath = path.join(__dirname, '../../dist');
-  if (fs.existsSync(distPath)) {
+  // Serve frontend — look in multiple locations for the built SPA
+  const possibleDistPaths = [
+    path.join(__dirname, '../../dist'),   // running from dist/index.js
+    path.join(__dirname, '../dist'),       // running from server/dist/index.js
+    path.join(process.cwd(), 'dist'),     // running from project root
+  ];
+  const distPath = possibleDistPaths.find(p => fs.existsSync(path.join(p, 'index.html')));
+  if (distPath) {
+    app.log.info(`Serving frontend from ${distPath}`);
     await app.register(fastifyStatic, { root: distPath, prefix: '/', decorateReply: true });
     app.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith('/api/')) {
@@ -72,6 +81,8 @@ async function buildServer() {
       }
       return reply.sendFile('index.html');
     });
+  } else {
+    app.log.warn('No frontend dist/ found — API-only mode');
   }
 
   return app;

@@ -90,7 +90,12 @@ export const users = pgTable('users', {
   id: uuid('id').defaultRandom().primaryKey(),
   email: varchar('email', { length: 255 }).notNull().unique(),
   passwordHash: varchar('password_hash', { length: 255 }),
+  firstName: varchar('first_name', { length: 255 }),
+  middleName: varchar('middle_name', { length: 255 }),
+  lastName: varchar('last_name', { length: 255 }),
   role: userRoleEnum('role').notNull().default('user'),
+  resetToken: varchar('reset_token', { length: 255 }),
+  resetTokenExpires: timestamp('reset_token_expires', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
 });
@@ -210,6 +215,27 @@ export const conversationMessages = pgTable('conversation_messages', {
   createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
 });
 
+export const reasoningTranscripts = pgTable('reasoning_transcripts', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  portalSessionId: uuid('portal_session_id').references(() => portalSessions.id, { onDelete: 'set null' }),
+  concept: varchar('concept', { length: 500 }),
+  subject: varchar('subject', { length: 255 }),
+  exam: varchar('exam', { length: 100 }),
+  questionIndex: integer('question_index'),
+  questionText: text('question_text'),
+  selectedAnswer: integer('selected_answer'),
+  correctAnswer: integer('correct_answer'),
+  isCorrect: boolean('is_correct'),
+  transcript: text('transcript'),
+  reasoningRequired: boolean('reasoning_required').default(false),
+  reasoningCategory: varchar('reasoning_category', { length: 50 }),
+  evidenceStrength: varchar('evidence_strength', { length: 50 }),
+  assessmentMode: varchar('assessment_mode', { length: 50 }),
+  responseTimeMs: integer('response_time_ms'),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ============================================================================
 // Type exports (for use in repositories)
 // ============================================================================
@@ -232,3 +258,5 @@ export type PortalSession = typeof portalSessions.$inferSelect;
 export type NewPortalSession = typeof portalSessions.$inferInsert;
 export type ConversationMessage = typeof conversationMessages.$inferSelect;
 export type NewConversationMessage = typeof conversationMessages.$inferInsert;
+export type ReasoningTranscript = typeof reasoningTranscripts.$inferSelect;
+export type NewReasoningTranscript = typeof reasoningTranscripts.$inferInsert;

@@ -1,4 +1,5 @@
 import { inferPattern } from "./assessment";
+import { analyzeAllReasoning, getReasoningMasteryMultiplier } from "./reasoning";
 
 // Deterministic, evidence-based report. Alpha narrates from this — never invents it.
 export function buildEvidenceReport(config, result, prevRecord) {
@@ -42,7 +43,35 @@ export function buildEvidenceReport(config, result, prevRecord) {
       : "needs_teaching";
   }
 
-  return {
+  // ── Reasoning analysis ──────────────────────────────────────────────
+  let reasoningAnalysis = null;
+  const reasoningData = result.reasoningData || {};
+  if (Object.keys(reasoningData).length > 0) {
+    // Build question results for reasoning analysis
+    const questionResults = [];
+    for (const [idx, data] of Object.entries(reasoningData)) {
+      const i = parseInt(idx);
+      const q = (config.questions || [])[i] || {};
+      const selectedAnswer = result.mistakes?.find(m => m.question?.question_text === q.question_text)
+        ? result.mistakes.find(m => m.question?.question_text === q.question_text).student
+        : (result.selectedAnswers || [])[i];
+      const correctAnswer = q.correct_index;
+      const isCorrect = selectedAnswer === correctAnswer;
+
+      questionResults.push({
+        questionIndex: i,
+        question: q,
+        reasoning: data.transcript || "",
+        selectedAnswer: selectedAnswer,
+        correctAnswer: correctAnswer,
+        isCorrect: isCorrect,
+        reasoningRequired: data.required || false,
+      });
+    }
+    reasoningAnalysis = analyzeAllReasoning(questionResults);
+  }
+
+  const report = {
     score: result.score,
     correct: result.correct,
     total: result.total,
@@ -55,5 +84,18 @@ export function buildEvidenceReport(config, result, prevRecord) {
     readyForHarder,
     confidence,
     knowledgeState,
+    assessmentMode: result.assessmentMode || config.assessmentMode || 'practice',
   };
+
+  // Attach reasoning analysis if available
+  if (reasoningAnalysis) {
+    report.reasoningAnalysis = reasoningAnalysis;
+    report.understandingLevel = reasoningAnalysis.understandingLevel;
+    report.reasoningScore = reasoningAnalysis.reasoningScore;
+    report.misconceptionsDetected = reasoningAnalysis.misconceptionCount;
+    report.guessCount = reasoningAnalysis.guessCount;
+    report.reasoningSummary = reasoningAnalysis.summary;
+  }
+
+  return report;
 }

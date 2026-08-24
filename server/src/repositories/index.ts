@@ -101,4 +101,11 @@ export const notes = new NoteRepository();
 export const questions = new QuestionRepository();
 export const portalSessions = new PortalSessionRepository();
 export const concepts = new ConceptRepository();
+export class ReasoningTranscriptRepository extends BaseRepository {
+  constructor() {
+    super(schema.reasoningTranscripts, 'reasoning_transcripts');
+  }
+}
+
 export const users = new UserRepository();
+export const reasoningTranscripts = new ReasoningTranscriptRepository();
