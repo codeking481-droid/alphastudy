@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
+import fastifyStatic from '@fastify/static';
 import { getEnv } from './config/env.js';
 import { closeDb } from './db/index.js';
 import { errorHandler } from './middleware/errors.js';
@@ -18,9 +19,14 @@ import {
   users,
 } from './repositories/index.js';
 import { EntityService } from './services/entity.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import fs from 'fs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ============================================================================
-// Alpha Study API Server
+// Alpha Study API Server — serves both API and frontend
 // ============================================================================
 
 async function buildServer() {
@@ -76,6 +82,28 @@ async function buildServer() {
     );
   }
 
+  // ── Serve Frontend Static Files ───────────────────────────────────────
+  // The frontend build output is at ../../dist (relative to server/src/)
+  const distPath = path.join(__dirname, '../../dist');
+
+  if (fs.existsSync(distPath)) {
+    await app.register(fastifyStatic, {
+      root: distPath,
+      prefix: '/',
+      decorateReply: true,
+    });
+
+    // SPA fallback: serve index.html for all non-API routes
+    app.setNotFoundHandler((request, reply) => {
+      if (request.url.startsWith('/api/')) {
+        return reply.status(404).send({ success: false, error: 'Not found' });
+      }
+      return reply.sendFile('index.html');
+    });
+  } else {
+    console.warn('⚠️  Frontend dist/ not found. Serving API only.');
+  }
+
   return app;
 }
 
@@ -89,9 +117,8 @@ async function start() {
 
   try {
     await app.listen({ port: env.API_PORT, host: '0.0.0.0' });
-    console.log(`\n🚀 Alpha Study API running on http://localhost:${env.API_PORT}`);
+    console.log(`\n🚀 Alpha Study running on http://localhost:${env.API_PORT}`);
     console.log(`   Environment: ${env.APP_ENV}`);
-    console.log(`   Database: ${env.DATABASE_URL.replace(/\/\/.*@/, '//***@')}`);
     console.log('');
   } catch (err) {
     app.log.error(err);

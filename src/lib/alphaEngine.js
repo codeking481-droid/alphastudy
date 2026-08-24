@@ -1,57 +1,17 @@
-const GROQ_API_KEY = import.meta.env.VITE_GROQ_API_KEY || '';
-const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
-async function invokeLLM({ prompt, response_json_schema }) {
-  if (!GROQ_API_KEY) {
-    throw new Error('GROQ_API_KEY not configured. Add VITE_GROQ_API_KEY to your environment.');
-  }
-
-  const body = {
-    model: 'llama-3.3-70b-versatile',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.7,
-    max_tokens: 4096,
-  };
-
-  if (response_json_schema) {
-    body.response_format = { type: 'json_object' };
-  }
-
-  const res = await fetch(GROQ_API_URL, {
+async function invokeLLM({ prompt, response_json_schema, file_urls }) {
+  const res = await fetch(`${API_BASE}/api/llm/invoke`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, response_json_schema, file_urls }),
   });
-
   if (!res.ok) {
-    const err = await res.text();
-    console.error('Groq API error:', res.status, err);
-    throw new Error(`AI request failed (${res.status})`);
+    const err = await res.json().catch(() => ({ error: 'LLM request failed' }));
+    throw new Error(err.error || `AI request failed (${res.status})`);
   }
-
-  const data = await res.json();
-  const content = data.choices?.[0]?.message?.content || '';
-
-  if (response_json_schema) {
-    try {
-      let jsonStr = content;
-      const match = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (match) jsonStr = match[1].trim();
-      const firstBrace = jsonStr.indexOf('{');
-      const lastBrace = jsonStr.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1) {
-        jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
-      }
-      return JSON.parse(jsonStr);
-    } catch {
-      return { reply: content };
-    }
-  }
-
-  return content;
+  const json = await res.json();
+  return json.data;
 }
 
 const SYSTEM = `You are Alpha, the adaptive AI learning orchestrator of Alpha Study (for JAMB, WAEC, NECO). You guide ONE student through a single continuous conversation. ALPHA IS THE APP — the student never picks tools; you decide every next step.
@@ -167,6 +127,7 @@ export async function getAlphaResponse({ userMessage, history, memorySummary, at
       },
       required: ["reply"],
     },
+    file_urls: attachments && attachments.length ? attachments : undefined,
   });
 }
 
