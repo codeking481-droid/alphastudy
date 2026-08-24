@@ -5,12 +5,10 @@ services:
     runtime: node
     plan: free
     buildCommand: |
-      # Build server
-      cd server && npm install && npm run build
-      # Build frontend
-      cd .. && npm install && npm run build
-      # Copy frontend build into server's dist/ so server can serve it
-      cp -r dist server/dist
+      cd server && npm install && npm run build && cd ..
+      npm install && npm run build
+      mkdir -p server/public
+      cp -r dist/* server/public/
     startCommand: cd server && node dist/index.js
     envVars:
       - key: DATABASE_URL
@@ -28,7 +26,7 @@ services:
         value: info
       - key: NODE_ENV
         value: production
-      - key: API_PORT
+      - key: PORT
         value: 10000
       - key: GROQ_API_KEY
         sync: false

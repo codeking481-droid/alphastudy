@@ -4,8 +4,25 @@ import pg from 'pg';
 import { getEnv } from '../config/env.js';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import fs from 'fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+function findMigrationsFolder(): string {
+  // When running from server/dist/index.js, migrations are in server/src/db/migrations
+  const candidates = [
+    path.join(__dirname, 'migrations'),           // server/dist/migrations
+    path.join(__dirname, '../src/db/migrations'),   // server/src/db/migrations (from dist/index.js)
+    path.join(__dirname, '../../src/db/migrations'), // server/dist/index.js → ../../src/db/migrations
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      console.log(`   Found migrations at: ${candidate}`);
+      return candidate;
+    }
+  }
+  throw new Error(`Migrations folder not found. Tried: ${candidates.join(', ')}`);
+}
 
 async function runMigrations() {
   const env = getEnv();
@@ -20,7 +37,7 @@ async function runMigrations() {
 
   try {
     await migrate(db, {
-      migrationsFolder: path.join(__dirname, 'migrations'),
+      migrationsFolder: findMigrationsFolder(),
     });
     console.log('✅ Migrations completed successfully');
   } catch (error) {

@@ -3,6 +3,7 @@ import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import { getEnv } from './config/env.js';
 import { closeDb } from './db/index.js';
+import { autoMigrate } from './db/automigrate.js';
 import { errorHandler } from './middleware/errors.js';
 import { healthRoutes } from './routes/health.js';
 import { llmRoutes } from './routes/llm.js';
@@ -67,9 +68,10 @@ async function buildServer() {
 
   // Serve frontend — look in multiple locations for the built SPA
   const possibleDistPaths = [
-    path.join(__dirname, '../../dist'),   // running from dist/index.js
-    path.join(__dirname, '../dist'),       // running from server/dist/index.js
-    path.join(process.cwd(), 'dist'),     // running from project root
+    path.join(__dirname, '../public'),     // production: server/public/
+    path.join(__dirname, '../../dist'),    // dev: project root dist/
+    path.join(__dirname, '../dist'),       // legacy: server/dist/
+    path.join(process.cwd(), 'dist'),     // fallback: cwd dist/
   ];
   const distPath = possibleDistPaths.find(p => fs.existsSync(path.join(p, 'index.html')));
   if (distPath) {
@@ -90,6 +92,14 @@ async function buildServer() {
 
 async function start() {
   const env = getEnv();
+
+  // Auto-migrate database on first boot
+  try {
+    await autoMigrate(env.DATABASE_URL);
+  } catch (err) {
+    console.error('⚠️  Auto-migration failed — server will start but some features may not work:', err);
+  }
+
   const app = await buildServer();
   try {
     await app.listen({ port: env.API_PORT, host: '0.0.0.0' });
