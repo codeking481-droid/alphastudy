@@ -4,6 +4,7 @@ import { getEnv } from './config/env.js';
 import { closeDb } from './db/index.js';
 import { errorHandler } from './middleware/errors.js';
 import { healthRoutes } from './routes/health.js';
+import { llmRoutes } from './routes/llm.js';
 import { registerEntityRoutes } from './routes/entity.js';
 import {
   conversationMessages,
@@ -45,6 +46,9 @@ async function buildServer() {
 
   // ── Health Routes ─────────────────────────────────────────────────────
   await app.register(healthRoutes);
+
+  // ── LLM Routes ───────────────────────────────────────────────────────
+  await app.register(llmRoutes);
 
   // ── Entity Routes ─────────────────────────────────────────────────────
   const entityRoutes: Array<{ path: string; name: string; service: EntityService }> = [

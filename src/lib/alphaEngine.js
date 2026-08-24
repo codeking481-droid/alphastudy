@@ -1,5 +1,18 @@
-const db = globalThis.__B44_DB__ || { auth:{ isAuthenticated: async()=>false, me: async()=>null }, entities:new Proxy({}, { get:()=>({ filter:async()=>[], get:async()=>null, create:async()=>({}), update:async()=>({}), delete:async()=>({}) }) }), integrations:{ Core:{ UploadFile:async()=>({ file_url:'' }) } } };
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
+async function invokeLLM({ prompt, response_json_schema, file_urls }) {
+  const res = await fetch(`${API_BASE}/api/llm/invoke`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, response_json_schema, file_urls }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'LLM request failed' }));
+    throw new Error(err.error || 'LLM request failed');
+  }
+  const json = await res.json();
+  return json.data;
+}
 
 const SYSTEM = `You are Alpha, the adaptive AI learning orchestrator of Alpha Study (for JAMB, WAEC, NECO). You guide ONE student through a single continuous conversation. ALPHA IS THE APP — the student never picks tools; you decide every next step.
 
@@ -99,18 +112,8 @@ const actionProps = {
 
 export async function getAlphaResponse({ userMessage, history, memorySummary, attachments }) {
   const convo = history.map((h) => `${h.role === "user" ? "Student" : "Alpha"}: ${h.content}`).join("\n");
-  const prompt = `${SYSTEM}
-
---- STUDENT MEMORY ---
-${memorySummary}
-
---- CONVERSATION ---
-${convo}
-
-Student: ${userMessage || "(sent an image or document attachment)"}
-
-Alpha (respond as JSON only):`;
-  const res = await db.integrations.Core.InvokeLLM({
+  const prompt = `${SYSTEM}\n\n--- STUDENT MEMORY ---\n${memorySummary}\n\n--- CONVERSATION ---\n${convo}\n\nStudent: ${userMessage || "(sent an image or document attachment)"}\n\nAlpha (respond as JSON only):`;
+  const res = await invokeLLM({
     prompt,
     response_json_schema: {
       type: "object",
@@ -130,20 +133,8 @@ Alpha (respond as JSON only):`;
 }
 
 export async function analyzeResult({ portalType, config, result, evidence, memorySummary, mission }) {
-  const prompt = `${SYSTEM}
-
-The student just completed a ${portalType} portal on "${config.concept}" and is back in the conversation.
-DETERMINISTIC EVIDENCE (ground truth — use it, never invent or contradict):
-${JSON.stringify(evidence || {})}
-
-Updated student memory:
-${memorySummary}
-
-ACTIVE MISSION (if present, continue working it one step at a time; this is the current state after advancing):
-${mission ? JSON.stringify({ goal: mission.goal, deadline: mission.deadline, total_minutes: mission.total_minutes, current_step: mission.current_step, steps: mission.steps }) : "none"}
-
-Continue the conversation: "You're back." Then give a SHORT, warm, evidence-grounded breakdown — what they know, what they missed and WHY (name recurring patterns), time problems, improvement, and the knowledgeState if present. Celebrate real progress; make failure safe. Then choose the SINGLE next action: if an active mission exists, advance to its next unfinished step (unless evidence demands a repair first); otherwise if readyForHarder → challenge or mastery_check; if recurring patterns → mistake_clinic (retest with different questions); if weak → review or lesson; if a prerequisite is missing → repair it. If the mission is now complete, acknowledge it and propose the next useful concept. Return JSON with "reply" and optional "action".`;
-  const res = await db.integrations.Core.InvokeLLM({
+  const prompt = `${SYSTEM}\n\nThe student just completed a ${portalType} portal on "${config.concept}" and is back in the conversation.\nDETERMINISTIC EVIDENCE (ground truth — use it, never invent or contradict):\n${JSON.stringify(evidence || {})}\n\nUpdated student memory:\n${memorySummary}\n\nACTIVE MISSION (if present, continue working it one step at a time; this is the current state after advancing):\n${mission ? JSON.stringify({ goal: mission.goal, deadline: mission.deadline, total_minutes: mission.total_minutes, current_step: mission.current_step, steps: mission.steps }) : "none"}\n\nContinue the conversation: "You're back." Then give a SHORT, warm, evidence-grounded breakdown — what they know, what they missed and WHY (name recurring patterns), time problems, improvement, and the knowledgeState if present. Celebrate real progress; make failure safe. Then choose the SINGLE next action: if an active mission exists, advance to its next unfinished step (unless evidence demands a repair first); otherwise if readyForHarder → challenge or mastery_check; if recurring patterns → mistake_clinic (retest with different questions); if weak → review or lesson; if a prerequisite is missing → repair it. If the mission is now complete, acknowledge it and propose the next useful concept. Return JSON with "reply" and optional "action".`;
+  const res = await invokeLLM({
     prompt,
     response_json_schema: {
       type: "object",
@@ -155,7 +146,7 @@ Continue the conversation: "You're back." Then give a SHORT, warm, evidence-grou
 }
 
 export async function teachLesson({ concept, subject, exam, style }) {
-  const res = await db.integrations.Core.InvokeLLM({
+  const res = await invokeLLM({
     prompt: `Teach the concept "${concept}"${subject ? ` in ${subject}` : ""}${exam ? ` for ${exam}` : ""}. The student learns best with: ${style || "analogies and real-life examples"}. Make it an ADVENTURE, not a textbook: open with a vivid hook/analogy, use simple language and a mental model, build step by step, give a worked example, include a comparison, flag common traps/misconceptions, add a memory hook, and connect it to the exam. Include ONE mid-lesson check question with 4 options that tests the core idea. Return structured JSON.`,
     response_json_schema: {
       type: "object",
@@ -181,17 +172,8 @@ export async function teachLesson({ concept, subject, exam, style }) {
 }
 
 export async function welcomeBack({ memorySummary, dueReviews }) {
-  const prompt = `${SYSTEM}
-
-The student just opened Alpha (returning user). Check their evidence and propose exactly ONE action targeting their most important weakness or a due spaced review. Be warm and brief ("Welcome back. I checked where you left off."), name the one thing to fix today, then launch it. Do not dump a task list. If a short time-bound mission clearly fits, you may include "mission".
-
-STUDENT EVIDENCE:
-${memorySummary}
-
-Due for spaced review now: ${(dueReviews && dueReviews.length ? dueReviews.map((r) => r.concept).join(", ") : "none")}
-
-Return JSON with "reply" and optional "action".`;
-  const res = await db.integrations.Core.InvokeLLM({
+  const prompt = `${SYSTEM}\n\nThe student just opened Alpha (returning user). Check their evidence and propose exactly ONE action targeting their most important weakness or a due spaced review. Be warm and brief ("Welcome back. I checked where you left off."), name the one thing to fix today, then launch it. Do not dump a task list. If a short time-bound mission clearly fits, you may include "mission".\n\nSTUDENT EVIDENCE:\n${memorySummary}\n\nDue for spaced review now: ${(dueReviews && dueReviews.length ? dueReviews.map((r) => r.concept).join(", ") : "none")}\n\nReturn JSON with "reply" and optional "action".`;
+  const res = await invokeLLM({
     prompt,
     response_json_schema: {
       type: "object",
