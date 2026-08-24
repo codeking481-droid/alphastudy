@@ -21,7 +21,7 @@ services:
       - key: APP_ENV
         value: production
       - key: CORS_ORIGIN
-        value: https://alpha-study.onrender.com
+        value: https://alphastudy.onrender.com,https://alphastudy.zone.id
       - key: LOG_LEVEL
         value: info
       - key: NODE_ENV
