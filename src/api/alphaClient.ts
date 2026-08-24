@@ -47,7 +47,7 @@ async function request<T>(
 // Entity Client — matches Base44 SDK patterns
 // ============================================================================
 
-class EntityClient<T> {
+class EntityClient {
   private basePath: string;
 
   constructor(entityPath: string) {
@@ -57,17 +57,17 @@ class EntityClient<T> {
   /**
    * List records — matches db.entities.X.list(sort, limit)
    */
-  async list(sort: string = '-created_date', limit: number = 200): Promise<T[]> {
+  async list(sort: string = '-created_at', limit: number = 200): Promise<any[]> {
     const params = new URLSearchParams({ sort, limit: String(limit) });
-    return request<T[]>('GET', `${this.basePath}/list?${params}`);
+    return request<any[]>('GET', `${this.basePath}/list?${params}`);
   }
 
   /**
    * Get by ID — matches db.entities.X.get(id)
    */
-  async get(id: string): Promise<T | null> {
+  async get(id: string): Promise<any | null> {
     try {
-      return await request<T>('GET', `${this.basePath}/${id}`);
+      return await request<any>('GET', `${this.basePath}/${id}`);
     } catch {
       return null;
     }
@@ -78,30 +78,30 @@ class EntityClient<T> {
    */
   async filter(
     query: Record<string, unknown>,
-    sort: string = '-created_date',
+    sort: string = '-created_at',
     limit: number = 100
-  ): Promise<T[]> {
+  ): Promise<any[]> {
     const params = new URLSearchParams({ sort, limit: String(limit) });
     for (const [key, value] of Object.entries(query)) {
       if (value !== undefined && value !== null) {
         params.set(key, String(value));
       }
     }
-    return request<T[]>('GET', `${this.basePath}/filter?${params}`);
+    return request<any[]>('GET', `${this.basePath}/filter?${params}`);
   }
 
   /**
    * Create — matches db.entities.X.create(data)
    */
-  async create(data: Partial<T>): Promise<T> {
-    return request<T>('POST', this.basePath, data);
+  async create(data: Record<string, unknown>): Promise<any> {
+    return request<any>('POST', this.basePath, data);
   }
 
   /**
    * Update — matches db.entities.X.update(id, data)
    */
-  async update(id: string, data: Partial<T>): Promise<T> {
-    return request<T>('PUT', `${this.basePath}/${id}`, data);
+  async update(id: string, data: Record<string, unknown>): Promise<any> {
+    return request<any>('PUT', `${this.basePath}/${id}`, data);
   }
 
   /**
@@ -118,15 +118,15 @@ class EntityClient<T> {
 
 export const db = {
   entities: {
-    ConversationMessage: new EntityClient<any>('conversation-messages'),
-    LearningRecord: new EntityClient<any>('learning-records'),
-    Mistake: new EntityClient<any>('mistakes'),
-    Mission: new EntityClient<any>('missions'),
-    Note: new EntityClient<any>('notes'),
-    Question: new EntityClient<any>('questions'),
-    PortalSession: new EntityClient<any>('portal-sessions'),
-    Concept: new EntityClient<any>('concepts'),
-    User: new EntityClient<any>('users'),
+    ConversationMessage: new EntityClient('conversation-messages'),
+    LearningRecord: new EntityClient('learning-records'),
+    Mistake: new EntityClient('mistakes'),
+    Mission: new EntityClient('missions'),
+    Note: new EntityClient('notes'),
+    Question: new EntityClient('questions'),
+    PortalSession: new EntityClient('portal-sessions'),
+    Concept: new EntityClient('concepts'),
+    User: new EntityClient('users'),
   },
 };
 

@@ -3,14 +3,17 @@ import { Link } from "react-router-dom";
 import { Notebook, Trash2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Markdown from "@/components/alpha/Markdown";
+import { db } from "@/api/alphaClient";
 
-function loadNotes() {
-  try {
-    return JSON.parse(localStorage.getItem("alpha_notes") || "[]");
-  } catch { return []; }
+const API_BASE = import.meta.env.VITE_API_URL || '';
+const HAS_API = !!API_BASE;
+
+function loadLocal() {
+  try { return JSON.parse(localStorage.getItem("alpha_notes") || "[]"); }
+  catch { return []; }
 }
 
-function saveNotes(notes) {
+function saveLocal(notes) {
   localStorage.setItem("alpha_notes", JSON.stringify(notes));
 }
 
@@ -19,14 +22,34 @@ export default function Notes() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    setNotes(loadNotes());
-    setLoading(false);
+    (async () => {
+      try {
+        if (HAS_API) {
+          try {
+            const apiNotes = await db.entities.Note.list("-created_date", 200);
+            setNotes(apiNotes);
+            saveLocal(apiNotes);
+          } catch {
+            setNotes(loadLocal());
+          }
+        } else {
+          setNotes(loadLocal());
+        }
+      } catch (e) {
+        setNotes(loadLocal());
+      } finally {
+        setLoading(false);
+      }
+    })();
   }, []);
 
-  const del = (id) => {
+  const del = async (id) => {
     const updated = notes.filter((n) => n.id !== id);
     setNotes(updated);
-    saveNotes(updated);
+    saveLocal(updated);
+    if (HAS_API) {
+      try { await db.entities.Note.delete(id); } catch {}
+    }
   };
 
   return (
