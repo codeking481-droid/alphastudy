@@ -1,47 +1,56 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 
-// Groq API configuration
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
+const GROQ_MODEL = 'llama-3.3-70b-versatile';
 
 export async function llmRoutes(app: FastifyInstance) {
   app.post('/api/llm/invoke', async (request: FastifyRequest, reply: FastifyReply) => {
     const apiKey = process.env.GROQ_API_KEY;
     if (!apiKey) {
-      return reply.status(500).send({
-        success: false,
-        error: 'GROQ_API_KEY not configured on server',
-      });
+      console.error('LLM proxy: GROQ_API_KEY not set');
+      return reply.status(500).send({ success: false, error: 'AI not configured. GROQ_API_KEY is missing on the server.' });
     }
 
     const body = request.body as any;
-    const { prompt, response_json_schema, file_urls } = body;
+    const { prompt, messages, response_json_schema } = body;
 
-    if (!prompt) {
-      return reply.status(400).send({
-        success: false,
-        error: 'prompt is required',
-      });
+    // Build messages array — accept either `messages` array or `prompt` string
+    let chatMessages: any[] = [];
+    if (Array.isArray(messages) && messages.length > 0) {
+      chatMessages = messages.map((m: any) => ({
+        role: m.role || 'user',
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+      }));
+    } else if (typeof prompt === 'string' && prompt.trim()) {
+      // Parse formatted prompt like "[system]: ...\n\n[user]: ..."
+      const parts = prompt.split(/\n\n(?=\[(?:system|user|assistant)\]:)/);
+      if (parts.length > 1) {
+        chatMessages = parts.map((part: string) => {
+          const match = part.match(/^\[(system|user|assistant)\]:\s*([\s\S]*)$/);
+          if (match) {
+            return { role: match[1], content: match[2].trim() };
+          }
+          return { role: 'user', content: part.trim() };
+        });
+      } else {
+        chatMessages = [{ role: 'user', content: prompt }];
+      }
+    } else {
+      return reply.status(400).send({ success: false, error: 'prompt or messages array is required' });
+    }
+
+    // Build Groq request
+    const requestBody: any = {
+      model: GROQ_MODEL,
+      messages: chatMessages,
+      temperature: 0.7,
+      max_tokens: 4096,
+    };
+    if (response_json_schema) {
+      requestBody.response_format = { type: 'json_object' };
     }
 
     try {
-      // Build messages for Groq
-      const messages: any[] = [
-        { role: 'user', content: prompt }
-      ];
-
-      // Build request body
-      const requestBody: any = {
-        model: 'llama-3.3-70b-versatile',
-        messages,
-        temperature: 0.7,
-        max_tokens: 4096,
-      };
-
-      // If JSON schema is requested, add response format
-      if (response_json_schema) {
-        requestBody.response_format = { type: 'json_object' };
-      }
-
       const response = await fetch(GROQ_API_URL, {
         method: 'POST',
         headers: {
@@ -52,27 +61,25 @@ export async function llmRoutes(app: FastifyInstance) {
       });
 
       if (!response.ok) {
-        const errorData = await response.text();
-        console.error('Groq API error:', response.status, errorData);
-        return reply.status(502).send({
-          success: false,
-          error: `Groq API error: ${response.status}`,
-        });
+        const errorText = await response.text();
+        console.error(`Groq API error ${response.status}:`, errorText.substring(0, 500));
+        return reply.status(502).send({ success: false, error: `Groq API error: ${response.status}` });
       }
 
       const data = await response.json() as any;
       const content = data.choices?.[0]?.message?.content || '';
 
+      if (!content) {
+        console.error('Groq returned empty content. Full response:', JSON.stringify(data).substring(0, 500));
+        return reply.status(502).send({ success: false, error: 'Groq returned empty response' });
+      }
+
       // Parse JSON if schema was requested
       if (response_json_schema) {
         try {
-          // Try to extract JSON from the response (might be wrapped in markdown)
           let jsonStr = content;
           const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-          if (jsonMatch) {
-            jsonStr = jsonMatch[1].trim();
-          }
-          // Also try to find raw JSON
+          if (jsonMatch) jsonStr = jsonMatch[1].trim();
           const firstBrace = jsonStr.indexOf('{');
           const lastBrace = jsonStr.lastIndexOf('}');
           if (firstBrace !== -1 && lastBrace !== -1) {
@@ -81,18 +88,14 @@ export async function llmRoutes(app: FastifyInstance) {
           const parsed = JSON.parse(jsonStr);
           return reply.send({ success: true, data: parsed });
         } catch {
-          // If JSON parsing fails, return the raw content
           return reply.send({ success: true, data: { reply: content } });
         }
       }
 
       return reply.send({ success: true, data: content });
     } catch (error: any) {
-      console.error('LLM invocation error:', error);
-      return reply.status(500).send({
-        success: false,
-        error: error.message || 'LLM invocation failed',
-      });
+      console.error('LLM proxy error:', error.message, error.stack);
+      return reply.status(500).send({ success: false, error: `LLM proxy failed: ${error.message}` });
     }
   });
 }

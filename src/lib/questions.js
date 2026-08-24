@@ -1,14 +1,15 @@
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-async function invokeLLM({ prompt, response_json_schema }) {
+async function invokeLLM(opts) {
+  if (!API_BASE) throw new Error('Backend API not configured. Set VITE_API_URL.');
   const res = await fetch(`${API_BASE}/api/llm/invoke`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, response_json_schema }),
+    body: JSON.stringify({ messages: opts.messages, prompt: opts.prompt, response_json_schema: opts.response_json_schema }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'LLM request failed' }));
-    throw new Error(err.error || `AI request failed (${res.status})`);
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Server error: ${res.status}`);
   }
   const json = await res.json();
   return json.data;
@@ -19,61 +20,49 @@ function shuffle(a) {
 }
 
 export async function fetchQuestions({ concept, difficulty, count, exam, subject }) {
-  // Try API first, fallback to AI generation
   if (API_BASE) {
     try {
       const params = new URLSearchParams({ concept, sort: '-created_date', limit: '100' });
-      const res = await fetch(`${API_BASE}/api/entities/questions/filter?${params}`);
+      const res = await fetch(`${API_BASE}/api/entities/questions/filter?${params}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('alpha_auth_token') || ''}` },
+      });
       if (res.ok) {
-        const json = await res.json();
-        let qs = json.data || [];
-        if (difficulty && difficulty !== "exam" && difficulty !== "challenge") {
+        let qs = (await res.json()).data || [];
+        if (difficulty && difficulty !== 'exam' && difficulty !== 'challenge') {
           qs = qs.filter((q) => !q.difficulty || q.difficulty === difficulty);
-        } else if (difficulty === "challenge") {
-          qs = qs.filter((q) => q.difficulty === "challenge" || q.difficulty === "advanced" || q.difficulty === "exam");
+        } else if (difficulty === 'challenge') {
+          qs = qs.filter((q) => q.difficulty === 'challenge' || q.difficulty === 'advanced' || q.difficulty === 'exam');
         }
         qs = shuffle(qs);
         if (qs.length >= count) return qs.slice(0, count);
       }
     } catch {}
   }
-  // Fallback: generate via AI
   return generateQuestions({ concept, difficulty, count, exam, subject });
 }
 
 export async function generateQuestions({ concept, difficulty, count, exam, subject }) {
-  const res = await invokeLLM({
-    prompt: `Generate ${count} original multiple-choice PRACTICE questions on the concept "${concept}"${
-      subject ? ` in ${subject}` : ""
-    }${exam ? ` for ${exam} preparation` : ""} at ${difficulty || "intermediate"} difficulty. Each must have exactly 4 options, a correct_index (0-3), and a short explanation. Be scientifically accurate.`,
-    response_json_schema: {
-      type: "object",
-      properties: {
-        questions: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              question_text: { type: "string" },
-              options: { type: "array", items: { type: "string" } },
-              correct_index: { type: "integer" },
-              explanation: { type: "string" },
-              difficulty: { type: "string" },
-            },
-            required: ["question_text", "options", "correct_index"],
-          },
-        },
+  const diff = difficulty || 'intermediate';
+  const examPart = exam ? ` for ${exam}` : '';
+  const subjectPart = subject ? ` in ${subject}` : '';
+
+  const result = await invokeLLM({
+    messages: [
+      {
+        role: 'user',
+        content: `Generate ${count} original MCQ practice questions on "${concept}"${subjectPart}${examPart} at ${diff} difficulty. Each: 4 options, correct_index (0-3), short explanation. Return as JSON with key "questions".`,
       },
-      required: ["questions"],
-    },
+    ],
   });
-  return (res.questions || []).map((q) => ({
+
+  const questions = Array.isArray(result) ? result : (result.questions || []);
+  return questions.map((q) => ({
     ...q,
     concept,
     exam,
     subject,
-    difficulty: q.difficulty || difficulty,
-    provenance: "ai_generated",
-    source_label: "AI-generated practice (not an official exam question)",
+    difficulty: q.difficulty || diff,
+    provenance: 'ai_generated',
+    source_label: 'AI-generated practice (not an official exam question)',
   }));
 }

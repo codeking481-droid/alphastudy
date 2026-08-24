@@ -1,14 +1,15 @@
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-async function invokeLLM({ prompt, response_json_schema, file_urls }) {
+async function invokeLLM({ messages, prompt, response_json_schema }) {
+  if (!API_BASE) throw new Error('Backend API not configured. Set VITE_API_URL.');
   const res = await fetch(`${API_BASE}/api/llm/invoke`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt, response_json_schema, file_urls }),
+    body: JSON.stringify({ messages, prompt, response_json_schema }),
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: 'LLM request failed' }));
-    throw new Error(err.error || `AI request failed (${res.status})`);
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || `Server error: ${res.status}`);
   }
   const json = await res.json();
   return json.data;
@@ -33,149 +34,216 @@ ACTIONS YOU CAN LAUNCH (via "action"):
 - mastery_check (MASTERY CHECK) — final no-hints challenge to confirm mastery
 
 JOURNEY LANGUAGE (use subtle progression cues, not dashboards):
-understand → practice → check → harder → mastery check → mastered → connect to next concept.
-After a portal closes you receive an evidence report — continue the SAME conversation ("You're back. Here's what I found…"). Never act like a new session started.
+- Never say "I'll launch a lesson." Say "Let's talk about..." or "Here's something interesting about..."
+- Never show percentages or scores unprompted. Say "you're getting solid on this" or "this needs more work."
+- Progress is felt, not displayed.
 
-ADAPTATION (deterministic evidence drives this, not your feelings):
-- Struggling (score <50, recurring patterns, missing prereqs): simplify, change explanation style, repair a prerequisite (set "concept" to the prerequisite and launch a lesson), then retest with DIFFERENT questions.
-- Doing well (score >=80, no recurring patterns, prereqs met): reduce assistance, move to exam-style, then unlock "challenge", then "mastery_check".
-- Never increase difficulty without evidence.
+STUDENT EVIDENCE BLOCK (always present, always latest):
+<student_evidence>
+{{STUDENT_EVIDENCE}}
+</student_evidence>
 
-INTENT MODES:
-- "Teach me X": do NOT dump a huge lesson. Acknowledge, then start a guided lesson ("First, let's understand the idea.").
-- "Test me on X": inspect evidence/curriculum, ask only for genuinely missing info, then open an appropriate assessment.
-- "I don't understand" / "I'm confused": do NOT paraphrase. Change strategy — simpler language, a different analogy, a visual mental model, a worked example, prerequisite repair, or Socratic questions.
-- "I keep getting this wrong": immediately check recurring mistakes in evidence; if a pattern repeats (count>=2), say so and launch mistake_clinic with that pattern.
+RESPONSE FORMAT — always a valid JSON object:
+{
+  "reply": "Your conversational message to the student",
+  "action": "lesson|quiz|practice|diagnostic|exam|review|mistake_clinic|challenge|mastery_check|null",
+  "action_config": { "concept": "...", "subject": "...", "exam": "...", "difficulty": "...", "count": 5, "duration": 600, "pattern": "..." } | null,
+  "note_offer": "Save this as a note for later?" | null,
+  "report": null | { "type": "evidence", ... },
+  "memory_updates": [ { "type": "set|update|append", "key": "...", "value": "..." } ] | []
+}
 
-CONFIDENCE & KNOWLEDGE: When the evidence report includes a "knowledgeState", use it: "dangerous_misconception" (confident but wrong) → confront it directly; "fragile" (unsure but correct) → reinforce with why; "strong" → celebrate and advance; "needs_teaching" → teach patiently.
+RULES:
+- If you detect a misunderstanding, use action "mistake_clinic" and set the pattern.
+- If mastery is high and spaced review is due, use action "review".
+- If the student asks to be tested, use action "quiz".
+- If the student asks for an exam, use action "exam".
+- Keep replies conversational, encouraging, and concise (2-4 sentences max unless teaching).
+- Always set action to something useful. Never leave action as null if there's a clear next step.
+- When launching a lesson, set action_config.subject and action_config.concept from the evidence.
+- When the student completes work and you see results, update mastery via memory_updates.
+- If this is the FIRST message (no evidence yet), greet warmly and ask what they're preparing for.`;
 
-TONE:
-- Warm, concise, energetic. Make learning feel like an adventure, not a textbook. Use analogies, real-life examples, memory hooks.
-- Celebrate REAL progress tied to evidence: "You fixed the exact mistake we worked on", "You're getting faster", "You're reasoning, not guessing." Never use empty praise.
-- Make failure safe: "Good — we found something to fix", "That's exactly why we're practicing." Never make the student feel like a failure.
-- When launching a portal, set the stage in a line or two ("Alright. Enough talking. Let's see what you can actually do.") then the action card.
-- After a portal, narrate results from the evidence report, then choose the single next step.
+export function buildMessages(userMessage, conversationHistory = [], studentEvidence = '') {
+  return [
+    { role: 'system', content: SYSTEM.replace('{{STUDENT_EVIDENCE}}', studentEvidence || 'No prior evidence — fresh student.') },
+    ...conversationHistory.map(m => ({
+      role: m.role === 'assistant' ? 'assistant' : 'user',
+      content: typeof m.content === 'string' ? m.content : m.content?.reply || JSON.stringify(m.content),
+    })),
+    { role: 'user', content: userMessage },
+  ];
+}
 
-HONESTY: NEVER claim a question is an official JAMB/WAEC/NECO past question unless provenance is verified. AI-generated questions stay labeled AI-generated.
+function parseAlphaResult(result) {
+  return {
+    reply: result.reply || "I'm here to help. Tell me what you'd like to learn!",
+    action: result.action || null,
+    action_config: result.action_config || null,
+    note_offer: result.note_offer || null,
+    report: result.report || null,
+    memory_updates: result.memory_updates || [],
+  };
+}
 
-PORTAL SIZING: quiz 8-12q/10min; exam 20-40q/20-40min; review 6q/8min; challenge 5q/10min; mastery_check 8q/12min; practice 8q untimed; diagnostic 10q/12min.
+/** Main entry point — called by Home.jsx send() */
+export async function getAlphaResponse({ userMessage, history, memorySummary, attachments }) {
+  const messages = buildMessages(
+    userMessage,
+    history || [],
+    memorySummary || ''
+  );
 
-PLANNER (time-aware missions & exam deadlines):
-- If the student gives available time ("I have 30 minutes" / "10 minutes" / "2 hours"), build a realistic mission whose step durations SUM to the available time using REAL activity durations (lesson ~5min, practice ~10min, quiz ~10min, challenge ~5min, review ~8min). Return the FIRST step as the action AND include "mission": { goal, deadline, total_minutes, steps:[{label, portal, concept, duration_minutes, question_count, difficulty}] }. Never invent fake completion times.
-- If the student gives an exam deadline ("JAMB in 3 weeks", "WAEC next Monday", "Biology tomorrow"), set mission.deadline and sequence steps that target weak concepts, recurring mistakes, spaced reviews, then exam simulations — based on evidence. Prioritise weak concepts first.
-- Work the mission ONE step at a time. After each portal closes you receive the mission state — advance to the next unfinished step, unless evidence demands a repair first (repair, then resume the mission).
-- DAILY OPENING: when welcoming the student back, check evidence and propose exactly ONE action targeting their most important weakness or a due spaced review. Never dump a task list.
-- ZERO-MOTIVATION: if the student is tired/unmotivated, shrink to a single tiny high-impact action ("Give me 5 minutes. I'll choose one thing that will actually improve your score.") — no motivational speeches.
-- SURPRISE ME: inspect evidence and pick the single most useful activity (usually a recurring weakness or due review) — never random.
-- KNOW WHEN TO TEACH / STOP: if evidence shows a concept is mastered, do NOT re-teach or keep drilling — test the harder version, run a mastery_check, or connect to the next prerequisite-linked concept. Mastery is only declared by the deterministic engine.
-- CONNECT CONCEPTS: when a concept is mastered, suggest the next concept that depends on it (from prerequisites in evidence). Don't jump randomly unless the student's goal requires it.
-- REFLECTION: after meaningful activity, briefly summarise what improved, what's still weak, and the next action — concisely, conversationally.
+  // Add attachment info if present
+  if (attachments && attachments.length > 0) {
+    const attachInfo = attachments.map(a => `[Attachment: ${a.name || 'file'}]`).join(', ');
+    messages.push({ role: 'user', content: `The student also shared: ${attachInfo}` });
+  }
 
-Return JSON: { "reply": string (markdown), "action": null | { type:"portal", portal, title, cta, concept, subject, exam, question_count, duration_minutes, difficulty, pattern, style, mission }, "note_offer": null | { title, content, concept } }`;
+  const result = await invokeLLM({
+    messages,
+    response_json_schema: {
+      type: 'object',
+      properties: {
+        reply: { type: 'string' },
+        action: { type: ['string', 'null'] },
+        action_config: { type: ['object', 'null'] },
+        note_offer: { type: ['string', 'null'] },
+        report: { type: ['object', 'null'] },
+        memory_updates: { type: 'array' },
+      },
+      required: ['reply'],
+    },
+  });
+  return parseAlphaResult(result);
+}
 
-const actionProps = {
-  type: { type: "string" },
-  portal: { type: "string", enum: ["lesson", "quiz", "exam", "mistake_clinic", "review", "challenge", "practice", "diagnostic", "mastery_check"] },
-  title: { type: "string" },
-  cta: { type: "string" },
-  concept: { type: "string" },
-  subject: { type: "string" },
-  exam: { type: "string" },
-  question_count: { type: "integer" },
-  duration_minutes: { type: "integer" },
-  difficulty: { type: "string" },
-  pattern: { type: "string" },
-  style: { type: "string" },
-  mission: {
-    type: "object",
-    properties: {
-      goal: { type: "string" },
-      deadline: { type: "string" },
-      total_minutes: { type: "integer" },
-      steps: {
-        type: "array",
-        items: {
-          type: "object",
+/** Analyze portal result after student completes a quiz/exam/etc */
+export async function analyzeResult({ portalType, concept, results, history }) {
+  const result = await invokeLLM({
+    messages: [
+      ...(history || []).map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+      })),
+      {
+        role: 'user',
+        content: `The student just completed a ${portalType} on "${concept}". Results:\n${JSON.stringify(results)}\n\nAnalyze their performance. Provide a conversational summary of what they got right, what they need to work on, and what to do next. Set appropriate memory_updates.`,
+      },
+    ],
+    response_json_schema: {
+      type: 'object',
+      properties: {
+        reply: { type: 'string' },
+        action: { type: ['string', 'null'] },
+        action_config: { type: ['object', 'null'] },
+        note_offer: { type: ['string', 'null'] },
+        report: { type: ['object', 'null'] },
+        memory_updates: { type: 'array' },
+      },
+      required: ['reply'],
+    },
+  });
+  return parseAlphaResult(result);
+}
+
+/** Welcome back message for returning student */
+export async function welcomeBack({ history, memorySummary }) {
+  const result = await invokeLLM({
+    messages: [
+      ...((history || []).slice(-10).map(m => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: typeof m.content === 'string' ? m.content : JSON.stringify(m.content),
+      }))),
+      {
+        role: 'user',
+        content: 'The student is returning. Welcome them back. Based on their evidence, suggest what they should pick up next.',
+      },
+    ],
+    response_json_schema: {
+      type: 'object',
+      properties: {
+        reply: { type: 'string' },
+        action: { type: ['string', 'null'] },
+        action_config: { type: ['object', 'null'] },
+        note_offer: { type: ['string', 'null'] },
+        report: { type: ['object', 'null'] },
+        memory_updates: { type: 'array' },
+      },
+      required: ['reply'],
+    },
+  });
+  return parseAlphaResult(result);
+}
+
+/** Generate lesson content */
+export async function generateLessonContent(concept, subject, exam) {
+  return await invokeLLM({
+    messages: [
+      { role: 'user', content: `Create an interactive lesson on "${concept}"${subject ? ` in ${subject}` : ''}${exam ? ` for ${exam}` : ''}. Include: explanation, key points, examples, and a quick check question. Make it engaging and clear.` },
+    ],
+    response_json_schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        content: { type: 'string' },
+        key_points: { type: 'array', items: { type: 'string' } },
+        examples: { type: 'array', items: { type: 'string' } },
+        check_question: {
+          type: 'object',
           properties: {
-            label: { type: "string" },
-            portal: { type: "string" },
-            concept: { type: "string" },
-            duration_minutes: { type: "integer" },
-            question_count: { type: "integer" },
-            difficulty: { type: "string" },
+            question: { type: 'string' },
+            options: { type: 'array', items: { type: 'string' } },
+            correct_index: { type: 'integer' },
+            explanation: { type: 'string' },
           },
         },
       },
+      required: ['title', 'content'],
     },
-  },
-};
+  });
+}
 
-export async function getAlphaResponse({ userMessage, history, memorySummary, attachments }) {
-  const convo = history.map((h) => `${h.role === "user" ? "Student" : "Alpha"}: ${h.content}`).join("\n");
-  const prompt = `${SYSTEM}\n\n--- STUDENT MEMORY ---\n${memorySummary}\n\n--- CONVERSATION ---\n${convo}\n\nStudent: ${userMessage || "(sent an image or document attachment)"}\n\nAlpha (respond as JSON only):`;
+/** Analyze post-portal results */
+export async function analyzePostPortal(portalType, concept, results) {
   return await invokeLLM({
-    prompt,
+    messages: [
+      { role: 'user', content: `Analyze this ${portalType} result for concept "${concept}":\n${JSON.stringify(results)}\n\nProvide: analysis, areas of strength, areas to improve, and suggested next action.` },
+    ],
     response_json_schema: {
-      type: "object",
+      type: 'object',
       properties: {
-        reply: { type: "string" },
-        action: { type: ["object", "null"], properties: actionProps },
-        note_offer: {
-          type: ["object", "null"],
-          properties: { title: { type: "string" }, content: { type: "string" }, concept: { type: "string" } },
-        },
+        analysis: { type: 'string' },
+        strength_areas: { type: 'array', items: { type: 'string' } },
+        weakness_areas: { type: 'array', items: { type: 'string' } },
+        mastery_estimate: { type: 'number' },
+        next_action: { type: 'string' },
       },
-      required: ["reply"],
-    },
-    file_urls: attachments && attachments.length ? attachments : undefined,
-  });
-}
-
-export async function analyzeResult({ portalType, config, result, evidence, memorySummary, mission }) {
-  const prompt = `${SYSTEM}\n\nThe student just completed a ${portalType} portal on "${config.concept}" and is back in the conversation.\nDETERMINISTIC EVIDENCE (ground truth — use it, never invent or contradict):\n${JSON.stringify(evidence || {})}\n\nUpdated student memory:\n${memorySummary}\n\nACTIVE MISSION (if present, continue working it one step at a time; this is the current state after advancing):\n${mission ? JSON.stringify({ goal: mission.goal, deadline: mission.deadline, total_minutes: mission.total_minutes, current_step: mission.current_step, steps: mission.steps }) : "none"}\n\nContinue the conversation: "You're back." Then give a SHORT, warm, evidence-grounded breakdown — what they know, what they missed and WHY (name recurring patterns), time problems, improvement, and the knowledgeState if present. Celebrate real progress; make failure safe. Then choose the SINGLE next action: if an active mission exists, advance to its next unfinished step (unless evidence demands a repair first); otherwise if readyForHarder → challenge or mastery_check; if recurring patterns → mistake_clinic (retest with different questions); if weak → review or lesson; if a prerequisite is missing → repair it. If the mission is now complete, acknowledge it and propose the next useful concept. Return JSON with "reply" and optional "action".`;
-  return await invokeLLM({
-    prompt,
-    response_json_schema: {
-      type: "object",
-      properties: { reply: { type: "string" }, action: { type: ["object", "null"], properties: actionProps } },
-      required: ["reply"],
+      required: ['analysis'],
     },
   });
 }
 
-export async function teachLesson({ concept, subject, exam, style }) {
-  return await invokeLLM({
-    prompt: `Teach the concept "${concept}"${subject ? ` in ${subject}` : ""}${exam ? ` for ${exam}` : ""}. The student learns best with: ${style || "analogies and real-life examples"}. Make it an ADVENTURE, not a textbook: open with a vivid hook/analogy, use simple language and a mental model, build step by step, give a worked example, include a comparison, flag common traps/misconceptions, add a memory hook, and connect it to the exam. Include ONE mid-lesson check question with 4 options that tests the core idea. Return structured JSON.`,
-    response_json_schema: {
-      type: "object",
-      properties: {
-        title: { type: "string" },
-        analogy: { type: "string" },
-        explanation: { type: "string" },
-        key_points: { type: "array", items: { type: "string" } },
-        example: { type: "string" },
-        check_question: { type: "string" },
-        check_options: { type: "array", items: { type: "string" } },
-        check_correct_index: { type: "integer" },
-        check_explanation: { type: "string" },
-        compare: { type: "string" },
-        common_mistakes: { type: "array", items: { type: "string" } },
-        memory_hook: { type: "string" },
-        exam_tip: { type: "string" },
+/** Teach a lesson — used by LessonPortal */
+export async function teachLesson(config = {}) {
+  const { concept, subject, exam } = config;
+  const result = await invokeLLM({
+    messages: [
+      {
+        role: 'user',
+        content: `Create a structured interactive lesson on "${concept || 'general knowledge'}"${subject ? ` in ${subject}` : ''}${exam ? ` for ${exam}` : ''}. Return JSON with: title, sections (array of {kind: analogy|explanation|example|trap|compare|memory|exam, heading, body}), check_question ({question, options, correct_index, explanation}).`,
       },
-      required: ["title", "explanation"],
-    },
+    ],
   });
+  // Normalize result
+  if (result.title && result.sections) return result;
+  return {
+    title: result.title || concept || 'Lesson',
+    sections: result.sections || [
+      { kind: 'explanation', heading: 'Overview', body: JSON.stringify(result) },
+    ],
+    check_question: result.check_question || null,
+  };
 }
 
-export async function welcomeBack({ memorySummary, dueReviews }) {
-  const prompt = `${SYSTEM}\n\nThe student just opened Alpha (returning user). Check their evidence and propose exactly ONE action targeting their most important weakness or a due spaced review. Be warm and brief ("Welcome back. I checked where you left off."), name the one thing to fix today, then launch it. Do not dump a task list. If a short time-bound mission clearly fits, you may include "mission".\n\nSTUDENT EVIDENCE:\n${memorySummary}\n\nDue for spaced review now: ${(dueReviews && dueReviews.length ? dueReviews.map((r) => r.concept).join(", ") : "none")}\n\nReturn JSON with "reply" and optional "action".`;
-  return await invokeLLM({
-    prompt,
-    response_json_schema: {
-      type: "object",
-      properties: { reply: { type: "string" }, action: { type: ["object", "null"], properties: actionProps } },
-      required: ["reply"],
-    },
-  });
-}
+export { invokeLLM };
