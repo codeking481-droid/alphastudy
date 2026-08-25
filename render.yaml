@@ -30,6 +30,8 @@ services:
         value: 10000
       - key: GROQ_API_KEY
         sync: false
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
       - key: ALOC_API_KEY
         sync: false
     healthCheckPath: /api/health

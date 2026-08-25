@@ -1,7 +1,6 @@
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 async function invokeLLM({ messages, prompt, response_json_schema }) {
-  if (!API_BASE) throw new Error('Backend API not configured. Set VITE_API_URL.');
   const res = await fetch(`${API_BASE}/api/llm/invoke`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
