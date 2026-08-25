@@ -17,6 +17,11 @@ let alocStatus: AlocStatus = {
   lastSuccess: null, lastFailure: null, importedCount: 0,
 };
 
+// 5-min in-memory cache to avoid hammering ALOC on every portal launch
+const alocCache = new Map<string, { data: any; expires: number }>();
+const CACHE_TTL = 5 * 60 * 1000;
+function cacheKey(params: Record<string, string>) { return JSON.stringify(params); }
+
 async function alocRequest(endpoint: string, apiKey: string, params?: Record<string, string>) {
   const url = new URL(`${ALOC_BASE}${endpoint}`);
   if (params) for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
@@ -47,7 +52,13 @@ export async function alocRoutes(app: FastifyInstance) {
       if (examType) params.examType = examType;
       if (year) params.year = year;
       params.limit = String(Math.min(limit, 50));
+      const key = cacheKey(params);
+      const cached = alocCache.get(key);
+      if (cached && cached.expires > Date.now()) {
+        return reply.send({ success: true, data: cached.data });
+      }
       const data = await alocRequest('/questions', apiKey, params);
+      alocCache.set(key, { data, expires: Date.now() + CACHE_TTL });
       alocStatus.configured = true; alocStatus.reachable = true; alocStatus.authorized = true;
       alocStatus.lastSuccess = new Date().toISOString();
       return reply.send({ success: true, data });

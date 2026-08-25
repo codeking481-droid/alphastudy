@@ -1,6 +1,9 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
+import compress from '@fastify/compress';
 import { getEnv } from './config/env.js';
 import { closeDb, getPglite, isEmbeddedDb } from './db/index.js';
 import { autoMigrate } from './db/automigrate.js';
@@ -25,6 +28,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 async function buildServer() {
   const env = getEnv();
   const app = Fastify({
+    trustProxy: true,
     logger: {
       level: env.LOG_LEVEL,
       transport: env.APP_ENV === 'development'
@@ -32,6 +36,16 @@ async function buildServer() {
         : undefined,
     },
   });
+
+  // Security headers (OWASP 2026) — must be first
+  await app.register(helmet, {
+    contentSecurityPolicy: false, // Vite inline scripts need unsafe-inline; keep false until strict CSP
+    crossOriginEmbedderPolicy: false,
+  });
+  // Compression — must be before static
+  await app.register(compress, { global: true, threshold: 1024 });
+  // Global rate limit: 200 req / 15min per IP
+  await app.register(rateLimit, { max: 200, timeWindow: '15 minutes', addHeaders: { 'x-ratelimit-remaining': true } });
 
   await app.register(cors, {
     origin: env.CORS_ORIGIN.split(',').map((s) => s.trim()),
