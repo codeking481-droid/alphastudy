@@ -2,7 +2,7 @@ import React from "react";
 import PortalShell from "./PortalShell";
 import QuestionRunner from "./QuestionRunner";
 import LessonPortal from "./LessonPortal";
-import { BookOpen, ListChecks, FileText, Stethoscope, RefreshCw, Swords, ClipboardCheck, ShieldCheck } from "lucide-react";
+import { ListChecks, FileText, Stethoscope, RefreshCw, Swords, ClipboardCheck, ShieldCheck } from "lucide-react";
 
 const META = {
   quiz: { icon: ListChecks, accent: "indigo" },

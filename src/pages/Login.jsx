@@ -6,7 +6,6 @@ import { Label } from "@/components/ui/label";
 import { LogIn, Mail, Lock, Loader2, WifiOff, ServerCrash } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 import { useAuth } from "@/lib/AuthContext";
-import { db } from "@/api/alphaClient";
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
