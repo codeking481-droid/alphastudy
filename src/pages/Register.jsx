@@ -3,19 +3,15 @@ import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { UserPlus, Mail, Lock, User, Loader2, WifiOff, ServerCrash } from "lucide-react";
+import { UserPlus, Mail, Lock, Loader2, WifiOff, ServerCrash } from "lucide-react";
 import AuthLayout from "@/components/AuthLayout";
 import { useAuth } from "@/lib/AuthContext";
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
 export default function Register() {
-  const [firstName, setFirstName] = useState("");
-  const [middleName, setMiddleName] = useState("");
-  const [lastName, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [serverStatus, setServerStatus] = useState("checking");
@@ -41,23 +37,13 @@ export default function Register() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    if (password !== confirmPassword) {
-      setError("Passwords do not match. Please make sure both passwords are the same.");
-      return;
-    }
     if (password.length < 6) {
       setError("Password must be at least 6 characters long.");
       return;
     }
     setLoading(true);
     try {
-      await register({
-        email,
-        password,
-        firstName: firstName || undefined,
-        middleName: middleName || undefined,
-        lastName: lastName || undefined,
-      });
+      await register({ email, password });
       navigate("/");
     } catch (err) {
       const msg = err.message || "Registration failed";
@@ -106,49 +92,6 @@ export default function Register() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="firstName">First Name</Label>
-          <div className="relative">
-            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              id="firstName"
-              type="text"
-              autoFocus
-              placeholder="First name"
-              value={firstName}
-              onChange={(e) => setFirstName(e.target.value)}
-              className="pl-10 h-12"
-            />
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="middleName">Middle Name <span className="text-muted-foreground text-xs">(optional)</span></Label>
-          <div className="relative">
-            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              id="middleName"
-              type="text"
-              placeholder="Middle name"
-              value={middleName}
-              onChange={(e) => setMiddleName(e.target.value)}
-              className="pl-10 h-12"
-            />
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="lastName">Last Name</Label>
-          <div className="relative">
-            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              id="lastName"
-              type="text"
-              placeholder="Last name"
-              value={lastName}
-              onChange={(e) => setLastName(e.target.value)}
-              className="pl-10 h-12"
-            />
-          </div>
-        </div>
-        <div className="space-y-2">
           <Label htmlFor="email">Email</Label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
@@ -173,21 +116,6 @@ export default function Register() {
               placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="pl-10 h-12"
-              required
-            />
-          </div>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="confirm">Confirm Password</Label>
-          <div className="relative">
-            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              id="confirm"
-              type="password"
-              placeholder="••••••••"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
               className="pl-10 h-12"
               required
             />
