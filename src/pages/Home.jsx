@@ -145,7 +145,7 @@ export default function Home() {
       if (ttsOn) speak(res.reply);
     } catch (e) {
       console.error("Alpha response error:", e);
-      const errMsg = makeMsg("alpha", "I hit a snag: " + (e.message || 'Could not reach AI backend. Check that the server is running and VITE_API_URL is set.') + " Let's try that again — could you rephrase?");
+      const errMsg = makeMsg("alpha", "I hit a snag: " + (e.message || 'Could not reach Alpha AI. Please check your connection and try again.') + " Let's try that again — could you rephrase?");
       setMessages((m) => { const next = [...m, errMsg]; saveLocal(next); return next; });
     } finally {
       setThinking(false);

@@ -1,14 +1,23 @@
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-async function invokeLLM({ messages, prompt, response_json_schema }) {
+async function invokeLLM({ messages, prompt, response_json_schema }, retries = 1) {
+  const token = localStorage.getItem('alpha_auth_token') || '';
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}/api/llm/invoke`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({ messages, prompt, response_json_schema }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `Server error: ${res.status}`);
+    const msg = err.error || `Server error: ${res.status}`;
+    if (retries > 0 && (res.status === 429 || res.status >= 500)) {
+      await new Promise((r) => setTimeout(r, 800));
+      return invokeLLM({ messages, prompt, response_json_schema }, retries - 1);
+    }
+    if (msg.includes('GROQ_API_KEY')) throw new Error('Alpha AI is not configured yet — admin needs to add GROQ_API_KEY on the server. Please try again later.');
+    throw new Error(msg);
   }
   const json = await res.json();
   return json.data;
