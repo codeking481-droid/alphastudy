@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, Volume2, VolumeX, Notebook } from "lucide-react";
+import { Sparkles, Volume2, VolumeX, Notebook, Menu, History, Trash2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "@/components/ui/sheet";
 import ChatMessage from "@/components/alpha/ChatMessage";
 import ChatInput from "@/components/alpha/ChatInput";
 import PortalRouter from "@/components/portals/PortalRouter";
@@ -57,6 +58,7 @@ export default function Home() {
   const [ttsOn, setTtsOn] = useState(false);
   const [dueReviews, setDueReviews] = useState([]);
   const [activeMission, setActiveMission] = useState(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const scrollRef = useRef(null);
   const welcomedRef = useRef(false);
 
@@ -96,7 +98,8 @@ export default function Home() {
               let wbAction = null;
               if (res.action && res.action !== 'null') {
                 const cfg = res.action_config || {};
-                wbAction = typeof res.action === 'object' ? res.action : { type: 'portal', portal: res.action, ...cfg, question_count: cfg.count || 8, title: cfg.title || `${String(res.action).replace(/_/g,' ')}`, ...cfg };
+                const fb = cfg.concept || cfg.subject || 'General';
+                wbAction = typeof res.action === 'object' ? res.action : { ...cfg, type: 'portal', portal: res.action, concept: fb, subject: cfg.subject || fb, exam: cfg.exam || 'WAEC', question_count: cfg.count || 8, title: cfg.title || `${String(res.action).replace(/_/g,' ')} — ${fb}` };
               }
               const msg = makeMsg("alpha", res.reply || "Welcome back.", { action: wbAction, report: res.report || null });
               if (HAS_API) {
@@ -146,20 +149,21 @@ export default function Home() {
           portalAction = res.action;
         } else if (typeof res.action === 'string') {
           const cfg = res.action_config || {};
+          const fallbackConcept = cfg.concept || cfg.subject || cfg.topic || (cfg.exam ? `${cfg.exam} ${cfg.subject || 'General'}` : null) || 'English';
           portalAction = {
+            ...cfg,
             type: 'portal',
             portal: res.action,
-            concept: cfg.concept,
-            subject: cfg.subject,
-            exam: cfg.exam,
+            concept: fallbackConcept,
+            subject: cfg.subject || fallbackConcept,
+            exam: cfg.exam || 'WAEC',
             question_count: cfg.count || cfg.question_count || (res.action === 'exam' ? 40 : res.action === 'diagnostic' ? 10 : 8),
             duration_minutes: cfg.duration ? Math.round(cfg.duration / 60) : (cfg.duration_minutes || (res.action === 'exam' ? 60 : res.action === 'quiz' ? 15 : undefined)),
-            difficulty: cfg.difficulty,
+            difficulty: cfg.difficulty || 'intermediate',
             pattern: cfg.pattern,
-            title: cfg.title || `${res.action.replace(/_/g, ' ')} — ${cfg.concept || cfg.subject || 'Alpha'}`,
+            title: cfg.title || `${res.action.replace(/_/g, ' ')} — ${fallbackConcept}`,
             cta: cfg.cta,
             assessmentMode: cfg.assessmentMode || res.action,
-            ...cfg,
           };
         }
       }
@@ -318,7 +322,8 @@ export default function Home() {
       const acfg = res.action_config || {};
       let nextAction = null;
       if (res.action && res.action !== 'null') {
-        nextAction = typeof res.action === 'object' ? res.action : { type: 'portal', portal: res.action, ...acfg, question_count: acfg.count || 8, title: acfg.title || `${String(res.action).replace(/_/g,' ')}`, ...acfg };
+        const fb2 = acfg.concept || acfg.subject || cfg.concept || 'General';
+        nextAction = typeof res.action === 'object' ? res.action : { ...acfg, type: 'portal', portal: res.action, concept: fb2, subject: acfg.subject || fb2, exam: acfg.exam || cfg.exam || 'WAEC', question_count: acfg.count || 8, title: acfg.title || `${String(res.action).replace(/_/g,' ')} — ${fb2}` };
       }
       const note2 = res.note_offer ? { content: res.reply, title: acfg.concept || cfg.concept, concept: cfg.concept } : null;
       const msg = makeMsg("alpha", res.reply || "Nice work. What's next?", {
@@ -345,29 +350,48 @@ export default function Home() {
 
   const handleSaveNote = async (note) => {
     const noteObj = typeof note === 'string' ? { title: 'Alpha note', content: note, concept: 'General' } : note;
-    // Save to localStorage
     try {
       const notes = JSON.parse(localStorage.getItem("alpha_notes") || "[]");
       notes.push({ id: String(Date.now()), title: noteObj.title || 'Note', content: noteObj.content || String(noteObj), concept: noteObj.concept || 'General', createdAt: new Date().toISOString() });
       localStorage.setItem("alpha_notes", JSON.stringify(notes));
     } catch {}
-    // Save to API
     if (HAS_API) {
       try { await db.entities.Note.create({ title: noteObj.title || 'Alpha note', content: noteObj.content || String(noteObj), concept: noteObj.concept || 'General' }); } catch {}
     }
   };
 
+  const handleNewChat = () => {
+    if (confirm('Start a new chat? Current conversation will be kept in history.')) {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify([]));
+      setMessages([makeMsg("alpha", "Hi, I'm **Alpha** — your personal learning orchestrator. 🌟\n\nTell me what you're preparing for — **JAMB**, **WAEC** or **NECO** — and a subject or topic. Or just say *\"help me prepare for JAMB\"* and I'll take it from here.")]);
+      setHistoryOpen(false);
+    }
+  };
+  const handleClearHistory = () => {
+    if (confirm('Clear all history? This cannot be undone.')) {
+      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem('alpha_memory');
+      setMessages([]);
+      setHistoryOpen(false);
+      loadMessages();
+    }
+  };
+
   return (
-    <div className="h-screen flex flex-col bg-background">
-      <header className="flex items-center justify-between px-4 py-3 border-b bg-background/80 backdrop-blur sticky top-0 z-10">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center">
+    <div className="h-[100dvh] h-screen flex flex-col bg-background overflow-hidden">
+      <header className="flex items-center justify-between px-2 sm:px-4 py-3 border-b bg-background/80 backdrop-blur sticky top-0 z-10 gap-1">
+        <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+          <Button variant="ghost" size="icon" className="shrink-0 h-8 w-8" onClick={() => setHistoryOpen(true)} title="History">
+            <Menu className="w-5 h-5" />
+          </Button>
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shrink-0">
             <Sparkles className="w-4 h-4 text-white" />
           </div>
-          <div>
-            <div className="font-semibold leading-none">Alpha Study</div>
-            <div className="text-xs text-muted-foreground">Your learning orchestrator</div>
+          <div className="min-w-0 hidden xs:block sm:block">
+            <div className="font-semibold leading-none text-sm sm:text-base truncate">Alpha Study</div>
+            <div className="text-[11px] sm:text-xs text-muted-foreground truncate">Your learning orchestrator</div>
           </div>
+          <div className="xs:hidden font-semibold text-sm truncate sm:hidden">Alpha</div>
         </div>
         <div className="flex items-center gap-1">
           {activeMission && activeMission.steps && (
@@ -390,13 +414,13 @@ export default function Home() {
       <div className="flex-1 relative overflow-hidden">
         <AnimatePresence mode="wait">
           {activePortal ? (
-            <motion.div key="portal" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="absolute inset-0">
+            <motion.div key="portal" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="absolute inset-0 overflow-y-auto">
               <PortalRouter portal={activePortal} onComplete={handlePortalComplete} onExit={handlePortalExit} />
             </motion.div>
           ) : (
             <motion.div key="chat" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 flex flex-col">
-              <div ref={scrollRef} className="flex-1 overflow-y-auto">
-                <div className="max-w-3xl mx-auto px-4 py-6 space-y-5">
+              <div ref={scrollRef} className="flex-1 overflow-y-auto overscroll-contain">
+                <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-5">
                   {loading ? (
                     <div className="text-center text-muted-foreground">Loading…</div>
                   ) : (
@@ -407,11 +431,37 @@ export default function Home() {
                   {thinking && <AlphaThinking />}
                 </div>
               </div>
-              <ChatInput onSend={send} thinking={thinking} />
+              <div className="shrink-0 border-t bg-background p-2 sm:p-0 pb-[env(safe-area-inset-bottom)]">
+                <ChatInput onSend={send} thinking={thinking} />
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
+
+      <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
+        <SheetContent side="left" className="w-[85vw] max-w-[320px] sm:max-w-sm p-0 flex flex-col">
+          <SheetHeader className="p-4 border-b text-left shrink-0">
+            <SheetTitle className="flex items-center gap-2 text-base"><History className="w-4 h-4" /> History</SheetTitle>
+            <SheetDescription className="text-xs">Your conversations and notes</SheetDescription>
+          </SheetHeader>
+          <div className="flex gap-2 p-3 border-b">
+            <Button size="sm" className="flex-1" onClick={handleNewChat}><Plus className="w-4 h-4 mr-1" /> New chat</Button>
+            <Button size="sm" variant="outline" onClick={handleClearHistory} title="Clear history"><Trash2 className="w-4 h-4" /></Button>
+          </div>
+          <div className="flex-1 overflow-y-auto p-2 space-y-2">
+            {messages.length === 0 ? <div className="text-sm text-muted-foreground p-4 text-center">No history yet</div> : messages.slice(-30).reverse().map((m) => (
+              <div key={m.id} className="rounded-lg border p-3 text-sm hover:bg-muted/50 cursor-pointer" onClick={() => setHistoryOpen(false)}>
+                <div className="text-xs text-muted-foreground mb-1">{m.role === 'user' ? 'You' : 'Alpha'} · {new Date(m.createdAt).toLocaleTimeString()}</div>
+                <div className="line-clamp-2 text-xs leading-relaxed">{typeof m.content === 'string' ? m.content.slice(0, 120) : JSON.stringify(m.content).slice(0, 120)}</div>
+              </div>
+            ))}
+          </div>
+          <div className="p-3 border-t">
+            <Link to="/notes" onClick={() => setHistoryOpen(false)} className="flex items-center gap-2 text-sm text-indigo-600 hover:underline"><Notebook className="w-4 h-4" /> View all notes</Link>
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
