@@ -93,7 +93,12 @@ export default function Home() {
             try {
               const memory = JSON.parse(localStorage.getItem("alpha_memory") || '{"records":[],"mistakes":[]}');
               const res = await welcomeBack({ memorySummary: JSON.stringify(memory), dueReviews: [] });
-              const msg = makeMsg("alpha", res.reply || "Welcome back.", { action: res.action || null });
+              let wbAction = null;
+              if (res.action && res.action !== 'null') {
+                const cfg = res.action_config || {};
+                wbAction = typeof res.action === 'object' ? res.action : { type: 'portal', portal: res.action, ...cfg, question_count: cfg.count || 8, title: cfg.title || `${String(res.action).replace(/_/g,' ')}`, ...cfg };
+              }
+              const msg = makeMsg("alpha", res.reply || "Welcome back.", { action: wbAction, report: res.report || null });
               if (HAS_API) {
                 try { await db.entities.ConversationMessage.create({ role: "alpha", content: msg.content, action: msg.action, kind: "message" }); } catch {}
               }
@@ -134,9 +139,36 @@ export default function Home() {
       const memorySummary = JSON.stringify(memory);
       const history = afterUser.slice(-10).map((m) => ({ role: m.role, content: m.content }));
       const res = await getAlphaResponse({ userMessage: text, history, memorySummary, attachments });
+      // Map AI action+config to portal ActionCard shape
+      let portalAction = null;
+      if (res.action && res.action !== 'null') {
+        if (typeof res.action === 'object' && res.action.type === 'portal') {
+          portalAction = res.action;
+        } else if (typeof res.action === 'string') {
+          const cfg = res.action_config || {};
+          portalAction = {
+            type: 'portal',
+            portal: res.action,
+            concept: cfg.concept,
+            subject: cfg.subject,
+            exam: cfg.exam,
+            question_count: cfg.count || cfg.question_count || (res.action === 'exam' ? 40 : res.action === 'diagnostic' ? 10 : 8),
+            duration_minutes: cfg.duration ? Math.round(cfg.duration / 60) : (cfg.duration_minutes || (res.action === 'exam' ? 60 : res.action === 'quiz' ? 15 : undefined)),
+            difficulty: cfg.difficulty,
+            pattern: cfg.pattern,
+            title: cfg.title || `${res.action.replace(/_/g, ' ')} — ${cfg.concept || cfg.subject || 'Alpha'}`,
+            cta: cfg.cta,
+            assessmentMode: cfg.assessmentMode || res.action,
+            ...cfg,
+          };
+        }
+      }
+      const noteOffer = res.note_offer ? { content: res.reply, title: res.action_config?.concept || 'Alpha note', concept: res.action_config?.concept } : null;
       const alphaMsg = makeMsg("alpha", res.reply || "…", {
-        action: res.action || null,
-        note_offer: res.note_offer || null,
+        action: portalAction,
+        action_config: res.action_config || null,
+        note_offer: noteOffer,
+        report: res.report || null,
       });
       if (HAS_API) {
         try { await db.entities.ConversationMessage.create({ role: "alpha", content: alphaMsg.content, action: alphaMsg.action, note_offer: alphaMsg.note_offer, kind: "message" }); } catch {}
@@ -283,8 +315,14 @@ export default function Home() {
     try {
       const memorySummary = JSON.stringify(memory);
       const res = await analyzeResult({ portalType, config: cfg, result, evidence, memorySummary, mission: missionState });
+      const acfg = res.action_config || {};
+      let nextAction = null;
+      if (res.action && res.action !== 'null') {
+        nextAction = typeof res.action === 'object' ? res.action : { type: 'portal', portal: res.action, ...acfg, question_count: acfg.count || 8, title: acfg.title || `${String(res.action).replace(/_/g,' ')}`, ...acfg };
+      }
+      const note2 = res.note_offer ? { content: res.reply, title: acfg.concept || cfg.concept, concept: cfg.concept } : null;
       const msg = makeMsg("alpha", res.reply || "Nice work. What's next?", {
-        action: res.action || null, report: evidence,
+        action: nextAction, note_offer: note2, report: evidence,
       });
       if (HAS_API) {
         try { await db.entities.ConversationMessage.create({ role: "alpha", content: msg.content, action: msg.action, report: evidence, kind: "message" }); } catch {}
@@ -306,15 +344,16 @@ export default function Home() {
   };
 
   const handleSaveNote = async (note) => {
+    const noteObj = typeof note === 'string' ? { title: 'Alpha note', content: note, concept: 'General' } : note;
     // Save to localStorage
     try {
       const notes = JSON.parse(localStorage.getItem("alpha_notes") || "[]");
-      notes.push({ id: String(Date.now()), ...note, createdAt: new Date().toISOString() });
+      notes.push({ id: String(Date.now()), title: noteObj.title || 'Note', content: noteObj.content || String(noteObj), concept: noteObj.concept || 'General', createdAt: new Date().toISOString() });
       localStorage.setItem("alpha_notes", JSON.stringify(notes));
     } catch {}
     // Save to API
     if (HAS_API) {
-      try { await db.entities.Note.create({ title: note.title, content: note.content, concept: note.concept }); } catch {}
+      try { await db.entities.Note.create({ title: noteObj.title || 'Alpha note', content: noteObj.content || String(noteObj), concept: noteObj.concept || 'General' }); } catch {}
     }
   };
 

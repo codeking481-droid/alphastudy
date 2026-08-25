@@ -1,7 +1,18 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const PRIMARY_MODEL = process.env.GROQ_MODEL || 'openai/gpt-oss-120b';
+const FALLBACK_MODELS = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+
+async function callGroq(model: string, body: any, apiKey: string) {
+  const res = await fetch(GROQ_API_URL, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...body, model }),
+  });
+  const text = await res.text();
+  return { res, text };
+}
 
 export async function llmRoutes(app: FastifyInstance) {
   app.post('/api/llm/invoke', async (request: FastifyRequest, reply: FastifyReply) => {
@@ -39,63 +50,60 @@ export async function llmRoutes(app: FastifyInstance) {
       return reply.status(400).send({ success: false, error: 'prompt or messages array is required' });
     }
 
-    // Build Groq request
-    const requestBody: any = {
-      model: GROQ_MODEL,
+    // Build base request (without model)
+    const baseBody: any = {
       messages: chatMessages,
       temperature: 0.7,
       max_tokens: 4096,
     };
-    if (response_json_schema) {
-      requestBody.response_format = { type: 'json_object' };
-    }
+    if (response_json_schema) baseBody.response_format = { type: 'json_object' };
 
-    try {
-      const response = await fetch(GROQ_API_URL, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Groq API error ${response.status}:`, errorText.substring(0, 500));
-        return reply.status(502).send({ success: false, error: `Groq API error: ${response.status}` });
-      }
-
-      const data = await response.json() as any;
-      const content = data.choices?.[0]?.message?.content || '';
-
-      if (!content) {
-        console.error('Groq returned empty content. Full response:', JSON.stringify(data).substring(0, 500));
-        return reply.status(502).send({ success: false, error: 'Groq returned empty response' });
-      }
-
-      // Parse JSON if schema was requested
-      if (response_json_schema) {
-        try {
-          let jsonStr = content;
-          const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
-          if (jsonMatch) jsonStr = jsonMatch[1].trim();
-          const firstBrace = jsonStr.indexOf('{');
-          const lastBrace = jsonStr.lastIndexOf('}');
-          if (firstBrace !== -1 && lastBrace !== -1) {
-            jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+    const models = [PRIMARY_MODEL, ...FALLBACK_MODELS.filter(m => m !== PRIMARY_MODEL)];
+    let lastError = '';
+    for (const model of models) {
+      try {
+        const { res, text } = await callGroq(model, baseBody, apiKey);
+        if (!res.ok) {
+          lastError = text.substring(0, 500);
+          console.error(`Groq ${model} error ${res.status}:`, lastError);
+          if (res.status === 429 || res.status === 502 || res.status === 529) {
+            if (model !== models[models.length - 1]) {
+              console.log(`→ Retrying with fallback ${models[models.indexOf(model) + 1]}`);
+              continue;
+            }
+            return reply.status(429).send({ success: false, error: `Groq rate limited on ${model}. Please wait 30s and try again.` });
           }
-          const parsed = JSON.parse(jsonStr);
-          return reply.send({ success: true, data: parsed });
-        } catch {
-          return reply.send({ success: true, data: { reply: content } });
+          return reply.status(502).send({ success: false, error: `Groq API error: ${res.status}` });
         }
+        let data: any;
+        try { data = JSON.parse(text); } catch { return reply.status(502).send({ success: false, error: 'Groq returned invalid JSON' }); }
+        const content = data.choices?.[0]?.message?.content || '';
+        if (!content) {
+          console.error(`Groq ${model} empty content`, JSON.stringify(data).substring(0, 500));
+          continue;
+        }
+        if (model !== PRIMARY_MODEL) console.log(`✅ Groq fallback ${model} succeeded`);
+        if (response_json_schema) {
+          try {
+            let jsonStr = content;
+            const jsonMatch = content.match(/```(?:json)?\s*([\s\S]*?)```/);
+            if (jsonMatch) jsonStr = jsonMatch[1].trim();
+            const firstBrace = jsonStr.indexOf('{');
+            const lastBrace = jsonStr.lastIndexOf('}');
+            if (firstBrace !== -1 && lastBrace !== -1) jsonStr = jsonStr.substring(firstBrace, lastBrace + 1);
+            const parsed = JSON.parse(jsonStr);
+            return reply.send({ success: true, data: parsed });
+          } catch {
+            return reply.send({ success: true, data: { reply: content } });
+          }
+        }
+        return reply.send({ success: true, data: content });
+      } catch (error: any) {
+        lastError = error.message;
+        console.error(`LLM proxy error on ${model}:`, error.message);
+        if (model === models[models.length - 1]) return reply.status(500).send({ success: false, error: `LLM proxy failed: ${lastError}` });
       }
-
-      return reply.send({ success: true, data: content });
-    } catch (error: any) {
-      console.error('LLM proxy error:', error.message, error.stack);
-      return reply.status(500).send({ success: false, error: `LLM proxy failed: ${error.message}` });
     }
+    return reply.status(500).send({ success: false, error: `LLM proxy failed: ${lastError}` });
   });
 }
